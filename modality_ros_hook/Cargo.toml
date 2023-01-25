@@ -1,0 +1,25 @@
+[package]
+name = "modality_ros_hook"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+redhook = "2.0"
+cstr = "0.2.11"
+lazy_static = "1.4"
+rpds = "0.12"
+archery = "0.4"
+arc-swap = "1.6"
+crossbeam = "0.8"
+widestring = "1"
+url = "2.1"
+tokio = { version = "1", features = ["rt", "sync"] }
+uuid = { version = "1", features = ["v5"] }
+fxhash = "0.2"
+
+modality-api = { git = "https://github.com/auxoncorp/modality-sdk", branch = "easier-config-resolution" }
+modality-ingest-client = { git = "https://github.com/auxoncorp/modality-sdk", branch = "easier-config-resolution" }
+
+[lib]
+name = "modality_ros_hook"
+crate_type = ["dylib"]
