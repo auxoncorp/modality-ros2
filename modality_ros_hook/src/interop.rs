@@ -129,23 +129,23 @@ pub struct RosIdlTypesupportIntrospectionCMessageMember {
     /// array indicated by index.
     pub get_function: Option<fn(*mut c_void, usize) -> *mut c_void>,
 
-    // TODO These don't exist in ROS galactic, but do in later versions.
-    // /// Pointer to a function that fetches (i.e. copies) an item from
-    // /// an array or sequence member. It takes a pointer to the member,
-    // /// an index (which is assumed to be valid), and a pointer to a
-    // /// pre-allocated value (which is assumed to be of the correct type).
-    // ///
-    // /// Available for array and sequence members.
-    // fetch_function: Option<fn(*const c_void, usize, *mut c_void) -> *mut c_void>,
+    /// Pointer to a function that fetches (i.e. copies) an item from
+    /// an array or sequence member. It takes a pointer to the member,
+    /// an index (which is assumed to be valid), and a pointer to a
+    /// pre-allocated value (which is assumed to be of the correct type).
+    ///
+    /// Available for array and sequence members.
+    fetch_function: Option<fn(*const c_void, usize, *mut c_void) -> *mut c_void>,
 
-    // /// Pointer to a function that assigns (i.e. copies) a value to an
-    // /// item in an array or sequence member. It takes a pointer to the
-    // /// member, an index (which is assumed to be valid), and a pointer
-    // /// to an initialized value (which is assumed to be of the correct
-    // /// type).
-    // ///
-    // /// Available for array and sequence members.
-    // assign_function: Option<fn(*mut c_void, usize, *const c_void) -> *mut c_void>,
+    /// Pointer to a function that assigns (i.e. copies) a value to an
+    /// item in an array or sequence member. It takes a pointer to the
+    /// member, an index (which is assumed to be valid), and a pointer
+    /// to an initialized value (which is assumed to be of the correct
+    /// type).
+    ///
+    /// Available for array and sequence members.
+    assign_function: Option<fn(*mut c_void, usize, *const c_void) -> *mut c_void>,
+
     /// If is_array_ is true, a pointer to a function that resizes the array.
     pub resize_function: Option<fn(*mut c_void, usize) -> bool>,
 }
