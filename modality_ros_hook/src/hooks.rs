@@ -229,9 +229,9 @@ redhook::hook! {
             let publisher_graph_id = pub_state.graph_id;
             let direction = MessageDirection::Send;
             let captured_message = CapturedMessage { kvs, topic_name, node_namespace, node_name, direction, publisher_graph_id };
-            LAST_CAPTURED_MESSAGE.with(|lcm| {
+            let _called_after_dest = LAST_CAPTURED_MESSAGE.try_with(|lcm| {
                 *lcm.borrow_mut() = Some(captured_message);
-            });
+            }).is_err();
         }
 
         redhook::real!(rmw_publish)(publisher_address, message, allocation)
@@ -255,7 +255,7 @@ redhook::hook! {
 
         // 0 means success
         if res == 0 {
-            LAST_CAPTURED_MESSAGE.with(|b| {
+            let _called_after_dest = LAST_CAPTURED_MESSAGE.try_with(|b| {
                 if let Some(msg) = b.borrow_mut().take() {
                     let msg_with_time = CapturedMessageWithTime {
                         msg,
@@ -269,7 +269,7 @@ redhook::hook! {
                     // would just be belaboring the point, repeatedly.
                     let _ = SEND_CH.send(msg_with_time);
                 }
-            });
+            }).is_err();
         }
 
         res
