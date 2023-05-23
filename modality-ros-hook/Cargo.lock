@@ -388,7 +388,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "modality_ros_hook"
+name = "modality-ros-hook"
 version = "0.1.0"
 dependencies = [
  "arc-swap",
