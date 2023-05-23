@@ -1,0 +1,46 @@
+name: CI
+
+on: [push, pull_request]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: moonrepo/setup-rust@v0
+
+      - name: Clippy
+        working-directory: modality-ros-hook
+        run: cargo clippy --all-features -- -W clippy::all -D warnings
+
+      - name: Format
+        working-directory: modality-ros-hook
+        run: cargo fmt --all -- --check
+
+      - name: Doc Generation
+        working-directory: modality-ros-hook
+        run: cargo doc --workspace --bins --examples --all-features --no-deps
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: moonrepo/setup-rust@v0
+
+      - name: Debug build
+        working-directory: modality-ros-hook
+        run: cargo build
+
+      - name: Release build
+        working-directory: modality-ros-hook
+        run: cargo build --release
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      - uses: moonrepo/setup-rust@v0
+
+      - name: Test
+        working-directory: modality-ros-hook
+        run: cargo test --all-features -- --test-threads=1
