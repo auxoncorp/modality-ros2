@@ -17,8 +17,8 @@ tokio = { version = "1", features = ["rt", "sync"] }
 uuid = { version = "1", features = ["v5"] }
 fxhash = "0.2"
 
-modality-api = { git = "https://github.com/auxoncorp/modality-sdk", branch = "main" }
-modality-ingest-client = { git = "https://github.com/auxoncorp/modality-sdk", branch = "main" }
+modality-api = "0.1"
+modality-ingest-client = "0.2"
 
 [lib]
 name = "modality_ros_hook"
