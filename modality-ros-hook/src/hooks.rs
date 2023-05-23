@@ -118,7 +118,7 @@ pub struct CapturedMessageWithTime<'p> {
     pub receive_time: Option<CapturedTime>,
 }
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Debug)]
 pub enum CapturedTime {
     Compound { sec: i64, nsec: i64 },
     SignedEpochNanos(i64),
@@ -134,7 +134,7 @@ impl CapturedTime {
                 let sec = sec as u64;
                 let nsec = nsec as u64;
                 Some(Nanoseconds::from(
-                    sec.checked_mul(1_000_000_000 as u64)? + nsec,
+                    sec.checked_mul(1_000_000_000_u64)? + nsec,
                 ))
             }
             CapturedTime::SignedEpochNanos(ns) => {

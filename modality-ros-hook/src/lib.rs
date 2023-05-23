@@ -79,6 +79,7 @@ pub enum FlatRosMessageMemberSchema {
 }
 
 impl RosMessageSchema {
+    #[allow(clippy::if_same_then_else)]
     unsafe fn from_c(type_support: *const interop::RosIdlMessageTypeSupportT) -> Option<Self> {
         let ts = interop::get_typesupport(type_support);
         if ts.is_null() {
@@ -104,16 +105,16 @@ impl RosMessageSchema {
         let mut members = vec![];
         for c_member in c_members {
             let name =
-                String::from_utf8_lossy(CStr::from_ptr((*c_member).name).to_bytes()).to_string();
-            let type_id = (*c_member).type_id_;
-            let offset = (*c_member).offset_ as usize;
+                String::from_utf8_lossy(CStr::from_ptr(c_member.name).to_bytes()).to_string();
+            let type_id = c_member.type_id_;
+            let offset = c_member.offset_ as usize;
 
-            let member = if (*c_member).is_array_ {
+            let member = if c_member.is_array_ {
                 let item_schema = if type_id == RosIdlTypesupportIntrospectionCFieldTypes::Message {
                     Box::new(RosMessageMemberSchema::NestedMessage {
                         name,
                         offset,
-                        schema: RosMessageSchema::from_c((*c_member).members_).unwrap(),
+                        schema: RosMessageSchema::from_c(c_member.members_).unwrap(),
                     })
                 } else {
                     Box::new(RosMessageMemberSchema::Scalar {
@@ -125,16 +126,16 @@ impl RosMessageSchema {
                 RosMessageMemberSchema::Array {
                     item_schema,
                     offset,
-                    array_size: (*c_member).array_size_,
-                    is_upper_bound: (*c_member).is_upper_bound_,
-                    size_function: (*c_member).size_function,
-                    get_function: (*c_member).get_const_function,
+                    array_size: c_member.array_size_,
+                    is_upper_bound: c_member.is_upper_bound_,
+                    size_function: c_member.size_function,
+                    get_function: c_member.get_const_function,
                 }
             } else if type_id == RosIdlTypesupportIntrospectionCFieldTypes::Message {
                 RosMessageMemberSchema::NestedMessage {
                     name,
                     offset,
-                    schema: RosMessageSchema::from_c((*c_member).members_).unwrap(),
+                    schema: RosMessageSchema::from_c(c_member.members_).unwrap(),
                 }
             } else {
                 RosMessageMemberSchema::Scalar {
@@ -161,7 +162,7 @@ impl RosMessageSchema {
     pub fn flatten(self, prefix: &Vec<String>) -> FlatRosMessageSchema {
         let mut members = vec![];
         for member in self.members.into_iter() {
-            member.flatten(&prefix, 0, &mut members);
+            member.flatten(prefix, 0, &mut members);
         }
 
         FlatRosMessageSchema {
@@ -236,7 +237,7 @@ impl RosMessageMemberSchema {
                     let mut name_segs = prefix.clone();
                     name_segs.push(name);
 
-                    let message_schema = schema.flatten(&prefix);
+                    let message_schema = schema.flatten(prefix);
 
                     target.push(FlatRosMessageMemberSchema::MessageSequence {
                         key: name_segs.join("."),
