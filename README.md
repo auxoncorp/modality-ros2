@@ -2,6 +2,9 @@
 
 Observability ([Modality](https://docs.auxon.io/modality/)) and Mutation ([Deviant](https://docs.auxon.io/deviant/)) support for [ROS 2](https://www.ros.org/).
 
+Supports the following ROS versions:
+* humble
+
 ## modality-ros-hook
 
 An `LD_PRELOAD` integration for the rmw (ROS middleware abstraction) interface layer that provides topic
