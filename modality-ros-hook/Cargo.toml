@@ -2,6 +2,13 @@
 name = "modality-ros-hook"
 version = "0.1.0"
 edition = "2021"
+authors = [
+    "Russell Mull <russell@auxon.io>",
+    "Jon Lamb <jon@auxon.io>",
+]
+description = "An LD_PRELOAD Modality integration for the rmw (ROS middleware abstraction) interface layer"
+license = "Apache-2.0"
+repository = "https://github.com/auxoncorp/modality-ros2"
 
 [dependencies]
 redhook = "2.0"
