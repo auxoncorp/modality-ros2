@@ -330,7 +330,7 @@ impl FlatRosMessageMemberSchema {
                     (*seq).size
                 };
 
-                if scalar_array_len > 5 {
+                if scalar_array_len > 12 {
                     //eprintln!("skipping large array: {scalar_array_len}");
                     return Some(());
                 }
