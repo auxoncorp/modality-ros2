@@ -62,13 +62,13 @@ struct NodeState {
 
 /// The unique identifier (gid) of a publisher.
 #[derive(Copy, Clone, Debug)]
-pub struct PublisherGraphId([u8; 24]);
+pub struct PublisherGraphId([u8; 16]);
 
 impl std::fmt::Display for PublisherGraphId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("0x")?;
         for b in self.0.iter() {
-            write!(f, "{b:0x}")?;
+            write!(f, "{b:02x}")?;
         }
 
         Ok(())
@@ -87,8 +87,12 @@ struct PublisherState {
 
 #[derive(Debug)]
 pub enum MessageDirection {
-    Send,
-    Receive,
+    Send {
+        local_publisher_graph_id: Option<PublisherGraphId>,
+    },
+    Receive {
+        remote_publisher_graph_id: Option<PublisherGraphId>,
+    },
 }
 
 type SubscriptionAddress = usize;
@@ -108,7 +112,6 @@ pub struct CapturedMessage<'p> {
     pub node_namespace: &'p str,
     pub node_name: &'p str,
     pub direction: MessageDirection,
-    pub publisher_graph_id: Option<PublisherGraphId>,
 }
 
 #[derive(Debug)]
@@ -226,9 +229,9 @@ redhook::hook! {
             let topic_name: &'static str = &*(pub_state.topic_name.as_str() as *const _);
             let node_namespace: &'static str = &*(pub_state.node_namespace.as_str() as *const _);
             let node_name: &'static str = &*(pub_state.node_name.as_str() as *const _);
-            let publisher_graph_id = pub_state.graph_id;
-            let direction = MessageDirection::Send;
-            let captured_message = CapturedMessage { kvs, topic_name, node_namespace, node_name, direction, publisher_graph_id };
+            // TODO ref here
+            let direction = MessageDirection::Send { local_publisher_graph_id: pub_state.graph_id.clone() };
+            let captured_message = CapturedMessage { kvs, topic_name, node_namespace, node_name, direction };
             let _called_after_dest = LAST_CAPTURED_MESSAGE.try_with(|lcm| {
                 *lcm.borrow_mut() = Some(captured_message);
             }).is_err();
@@ -334,11 +337,11 @@ redhook::hook! {
                 let node_namespace: &'static str = &*(sub_state.node_namespace.as_str() as *const _);
                 let node_name: &'static str = &*(sub_state.node_name.as_str() as *const _);
 
-                let direction = MessageDirection::Receive;
-                let publisher_graph_id = Some(PublisherGraphId((*message_info).publisher_gid.data));
+                let remote_publisher_graph_id = Some(PublisherGraphId((*message_info).publisher_gid.data));
+                let direction = MessageDirection::Receive { remote_publisher_graph_id };
 
                 let msg = CapturedMessageWithTime {
-                    msg: CapturedMessage { kvs, topic_name, node_namespace, node_name, direction, publisher_graph_id },
+                    msg: CapturedMessage { kvs, topic_name, node_namespace, node_name, direction},
                     publish_time: CapturedTime::SignedEpochNanos((*message_info).source_timestamp),
                     receive_time: Some(CapturedTime::SignedEpochNanos((*message_info).received_timestamp)),
                 };

@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use fxhash::FxHashMap;
+use fxhash::{FxHashMap, FxHashSet};
 use modality_api::{AttrVal, Nanoseconds, TimelineId, Uuid};
 use modality_ingest_client::{
     dynamic::DynamicIngestClient, protocol::InternedAttrKey, IngestClient,
@@ -10,8 +10,9 @@ use crate::hooks::{CapturedMessageWithTime, MessageDirection};
 
 pub struct MessageProcessor {
     client: modality_ingest_client::dynamic::DynamicIngestClient,
-    attr_cache: FxHashMap<String, InternedAttrKey>,
+    attr_key_cache: FxHashMap<String, InternedAttrKey>,
     timeline_cache: FxHashMap<TimelineCacheKey, TimelineCacheValue>,
+    sent_timeline_gid: FxHashSet<TimelineCacheKey>,
     currently_open_timeline: Option<TimelineId>,
     ordering: u128,
 }
@@ -32,8 +33,9 @@ impl MessageProcessor {
             IngestClient::connect_with_standard_config(Duration::from_secs(20), None, None).await?;
         Ok(MessageProcessor {
             client: DynamicIngestClient::from(client),
-            attr_cache: Default::default(),
+            attr_key_cache: Default::default(),
             timeline_cache: Default::default(),
+            sent_timeline_gid: Default::default(),
             ordering: 0,
             currently_open_timeline: None,
         })
@@ -71,21 +73,46 @@ impl MessageProcessor {
         )];
 
         match captured_message.msg.direction {
-            MessageDirection::Send => {
+            MessageDirection::Send {
+                local_publisher_graph_id,
+            } => {
+                if let Some(local_gid) = local_publisher_graph_id {
+                    let key = TimelineCacheKey {
+                        node_namespace: captured_message.msg.node_namespace,
+                        node_name: captured_message.msg.node_name,
+                    };
+
+                    if self.sent_timeline_gid.insert(key) {
+                        let k = self.interned_attr_key("timeline.ros.publisher_gid").await?;
+                        let v = AttrVal::String(local_gid.to_string());
+                        self.client.timeline_metadata([(k, v)]).await?;
+                    }
+                }
+
                 if let Some(t) = captured_message.publish_time.to_epoch_nanos() {
                     event_attrs.push((
                         self.interned_attr_key("event.timestamp").await?,
                         AttrVal::Timestamp(t),
                     ));
                 }
-                if let Some(gid) = captured_message.msg.publisher_graph_id {
-                    event_attrs.push((
-                        self.interned_attr_key("event.ros.publisher_gid").await?,
-                        AttrVal::String(gid.to_string()),
-                    ));
+
+                match captured_message.publish_time {
+                    crate::hooks::CapturedTime::Compound { sec, nsec } => {
+                        event_attrs.push((
+                            self.interned_attr_key("event.dds_time.sec").await?,
+                            AttrVal::Integer(sec),
+                        ));
+                        event_attrs.push((
+                            self.interned_attr_key("event.dds_time.nanosec").await?,
+                            AttrVal::Integer(nsec),
+                        ));
+                    }
+                    crate::hooks::CapturedTime::SignedEpochNanos(_) => todo!(),
                 }
             }
-            MessageDirection::Receive => {
+            MessageDirection::Receive {
+                remote_publisher_graph_id,
+            } => {
                 if let Some(t) = captured_message.publish_time.to_epoch_nanos() {
                     event_attrs.push((
                         self.interned_attr_key("event.interaction.remote_event.timestamp")
@@ -94,10 +121,12 @@ impl MessageProcessor {
                     ));
                 }
 
-                if let Some(gid) = captured_message.msg.publisher_graph_id {
+                if let Some(gid) = remote_publisher_graph_id {
                     event_attrs.push((
-                        self.interned_attr_key("event.interaction.remote_event.ros.publisher_gid")
-                            .await?,
+                        self.interned_attr_key(
+                            "event.interaction.remote_timeline.ros.publisher_gid",
+                        )
+                        .await?,
                         AttrVal::String(gid.to_string()),
                     ));
                 }
@@ -201,12 +230,12 @@ impl MessageProcessor {
         &mut self,
         name: &str,
     ) -> Result<InternedAttrKey, Box<dyn std::error::Error + Send + Sync>> {
-        if let Some(ik) = self.attr_cache.get(name) {
+        if let Some(ik) = self.attr_key_cache.get(name) {
             return Ok(*ik);
         }
 
         let ik = self.client.declare_attr_key(name.to_string()).await?;
-        self.attr_cache.insert(name.to_string(), ik);
+        self.attr_key_cache.insert(name.to_string(), ik);
         Ok(ik)
     }
 }
