@@ -6,13 +6,13 @@ use modality_ingest_client::{
     dynamic::DynamicIngestClient, protocol::InternedAttrKey, IngestClient,
 };
 
-use crate::hooks::{CapturedMessageWithTime, MessageDirection};
+use crate::hooks::{CapturedMessageWithTime, MessageDirection, PublisherGraphId};
 
 pub struct MessageProcessor {
     client: modality_ingest_client::dynamic::DynamicIngestClient,
     attr_key_cache: FxHashMap<String, InternedAttrKey>,
     timeline_cache: FxHashMap<TimelineCacheKey, TimelineCacheValue>,
-    sent_timeline_gid: FxHashSet<TimelineCacheKey>,
+    sent_timeline_publisher_metadata: FxHashSet<(TimelineCacheKey, PublisherGraphId)>,
     currently_open_timeline: Option<TimelineId>,
     ordering: u128,
 }
@@ -35,7 +35,7 @@ impl MessageProcessor {
             client: DynamicIngestClient::from(client),
             attr_key_cache: Default::default(),
             timeline_cache: Default::default(),
-            sent_timeline_gid: Default::default(),
+            sent_timeline_publisher_metadata: Default::default(),
             ordering: 0,
             currently_open_timeline: None,
         })
@@ -58,7 +58,6 @@ impl MessageProcessor {
         self.open_timeline(
             captured_message.msg.node_namespace,
             captured_message.msg.node_name,
-            captured_message.msg.topic_name,
         )
         .await?;
 
@@ -66,6 +65,9 @@ impl MessageProcessor {
         if event_name.starts_with('/') {
             event_name.remove(0);
         }
+
+        // http://wiki.ros.org/Names claims that names can't have '.' in them
+        let normalized_topic_name = event_name.replace("/", ".");
 
         let mut event_attrs = vec![(
             self.interned_attr_key("event.name").await?,
@@ -82,10 +84,19 @@ impl MessageProcessor {
                         node_name: captured_message.msg.node_name,
                     };
 
-                    if self.sent_timeline_gid.insert(key) {
-                        let k = self.interned_attr_key("timeline.ros.publisher_gid").await?;
-                        let v = AttrVal::String(local_gid.to_string());
-                        self.client.timeline_metadata([(k, v)]).await?;
+                    if self
+                        .sent_timeline_publisher_metadata
+                        .insert((key, local_gid.clone()))
+                    {
+                        let attrs = vec![(
+                            self.interned_attr_key(&format!(
+                                "timeline.ros.publisher_gid.{normalized_topic_name}"
+                            ))
+                            .await?,
+                            AttrVal::String(local_gid.to_string()),
+                        )];
+
+                        self.client.timeline_metadata(attrs).await?;
                     }
                 }
 
@@ -124,7 +135,7 @@ impl MessageProcessor {
                 if let Some(gid) = remote_publisher_graph_id {
                     event_attrs.push((
                         self.interned_attr_key(
-                            "event.interaction.remote_timeline.ros.publisher_gid",
+                            &format!("event.interaction.remote_timeline.ros.publisher_gid.{normalized_topic_name}")
                         )
                         .await?,
                         AttrVal::String(gid.to_string()),
@@ -172,7 +183,6 @@ impl MessageProcessor {
         &mut self,
         node_namespace: &'static str,
         node_name: &'static str,
-        topic_name: &'static str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let key = TimelineCacheKey {
             node_namespace,
@@ -185,45 +195,28 @@ impl MessageProcessor {
                 self.client.open_timeline(tl_cache_val.id).await?;
                 self.currently_open_timeline = Some(tl_cache_val.id);
             }
-            return Ok(());
-        }
+        } else {
+            // We haven't seen this timeline before, so allocate an id and send its basic metadata
+            let timeline_id = TimelineId::from(Uuid::new_v4());
+            self.client.open_timeline(timeline_id).await?;
+            self.currently_open_timeline = Some(timeline_id);
 
-        // We haven't seen this timeline before, so send its metadata
-        let timeline_id = TimelineId::from(Uuid::new_v4());
-        self.client.open_timeline(timeline_id).await?;
-        self.currently_open_timeline = Some(timeline_id);
+            let mut timeline_name = format!("{node_namespace}/{node_name}");
+            while timeline_name.starts_with('/') {
+                timeline_name.remove(0);
+            }
 
-        let tl_attrs = self
-            .timeline_attrs(key.node_namespace, key.node_name, topic_name)
-            .await?;
-        self.client.timeline_metadata(tl_attrs).await?;
-
-        self.timeline_cache
-            .insert(key, TimelineCacheValue { id: timeline_id });
-        Ok(())
-    }
-
-    async fn timeline_attrs(
-        &mut self,
-        node_namespace: &str,
-        node_name: &str,
-        topic_name: &str,
-    ) -> Result<Vec<(InternedAttrKey, AttrVal)>, Box<dyn std::error::Error + Send + Sync>> {
-        let mut timeline_name = format!("{node_namespace}{node_name}");
-        if timeline_name.starts_with('/') {
-            timeline_name.remove(0);
-        }
-
-        Ok(vec![
-            (
+            let tl_attrs = vec![(
                 self.interned_attr_key("timeline.name").await?,
                 AttrVal::String(timeline_name),
-            ),
-            (
-                self.interned_attr_key("timeline.ros.topic").await?,
-                AttrVal::String(topic_name.to_string()),
-            ),
-        ])
+            )];
+
+            self.client.timeline_metadata(tl_attrs).await?;
+            self.timeline_cache
+                .insert(key, TimelineCacheValue { id: timeline_id });
+        }
+
+        Ok(())
     }
 
     async fn interned_attr_key(

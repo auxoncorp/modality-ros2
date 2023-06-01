@@ -61,7 +61,7 @@ struct NodeState {
 }
 
 /// The unique identifier (gid) of a publisher.
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct PublisherGraphId([u8; 16]);
 
 impl std::fmt::Display for PublisherGraphId {
@@ -204,7 +204,7 @@ redhook::hook! {
             }
             publisher_address
         } else {
-            // If someone tries to createa publisher against an
+            // If someone tries to create a publisher against an
             // uninitialized node, I guess? This is probably an error,
             // and really shouldn't be happening.
             redhook::real!(rmw_create_publisher)
