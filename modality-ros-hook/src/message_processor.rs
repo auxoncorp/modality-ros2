@@ -67,7 +67,7 @@ impl MessageProcessor {
         }
 
         // http://wiki.ros.org/Names claims that names can't have '.' in them
-        let normalized_topic_name = event_name.replace("/", ".");
+        let normalized_topic_name = event_name.replace('/', ".");
 
         let mut event_attrs = vec![(
             self.interned_attr_key("event.name").await?,
@@ -86,7 +86,7 @@ impl MessageProcessor {
 
                     if self
                         .sent_timeline_publisher_metadata
-                        .insert((key, local_gid.clone()))
+                        .insert((key, local_gid))
                     {
                         let attrs = vec![(
                             self.interned_attr_key(&format!(

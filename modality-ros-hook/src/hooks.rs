@@ -230,7 +230,7 @@ redhook::hook! {
             let node_namespace: &'static str = &*(pub_state.node_namespace.as_str() as *const _);
             let node_name: &'static str = &*(pub_state.node_name.as_str() as *const _);
             // TODO ref here
-            let direction = MessageDirection::Send { local_publisher_graph_id: pub_state.graph_id.clone() };
+            let direction = MessageDirection::Send { local_publisher_graph_id: pub_state.graph_id };
             let captured_message = CapturedMessage { kvs, topic_name, node_namespace, node_name, direction };
             let _called_after_dest = LAST_CAPTURED_MESSAGE.try_with(|lcm| {
                 *lcm.borrow_mut() = Some(captured_message);
