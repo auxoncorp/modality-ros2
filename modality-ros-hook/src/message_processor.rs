@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use fxhash::{FxHashMap, FxHashSet};
-use modality_api::{AttrVal, Nanoseconds, TimelineId, Uuid};
+use modality_api::{AttrVal, Nanoseconds, TimelineId};
 use modality_ingest_client::{
     dynamic::DynamicIngestClient, protocol::InternedAttrKey, IngestClient,
 };
@@ -11,20 +11,10 @@ use crate::hooks::{CapturedMessageWithTime, MessageDirection, PublisherGraphId};
 pub struct MessageProcessor {
     client: modality_ingest_client::dynamic::DynamicIngestClient,
     attr_key_cache: FxHashMap<String, InternedAttrKey>,
-    timeline_cache: FxHashMap<TimelineCacheKey, TimelineCacheValue>,
-    sent_timeline_publisher_metadata: FxHashSet<(TimelineCacheKey, PublisherGraphId)>,
+    created_timelines: FxHashSet<TimelineId>,
+    sent_timeline_publisher_metadata: FxHashSet<(TimelineId, PublisherGraphId)>,
     currently_open_timeline: Option<TimelineId>,
     ordering: u128,
-}
-
-#[derive(Hash, Eq, PartialEq)]
-pub struct TimelineCacheKey {
-    node_namespace: &'static str,
-    node_name: &'static str,
-}
-
-struct TimelineCacheValue {
-    id: TimelineId,
 }
 
 impl MessageProcessor {
@@ -34,7 +24,7 @@ impl MessageProcessor {
         Ok(MessageProcessor {
             client: DynamicIngestClient::from(client),
             attr_key_cache: Default::default(),
-            timeline_cache: Default::default(),
+            created_timelines: Default::default(),
             sent_timeline_publisher_metadata: Default::default(),
             ordering: 0,
             currently_open_timeline: None,
@@ -43,7 +33,7 @@ impl MessageProcessor {
 
     pub async fn message_loop(
         mut self,
-        mut rx: tokio::sync::mpsc::UnboundedReceiver<CapturedMessageWithTime<'static>>,
+        mut rx: tokio::sync::mpsc::UnboundedReceiver<CapturedMessageWithTime>,
     ) {
         while let Some(captured_message) = rx.recv().await {
             // TODO top level errors, logging, ?
@@ -53,11 +43,12 @@ impl MessageProcessor {
 
     async fn handle_message(
         &mut self,
-        captured_message: CapturedMessageWithTime<'static>,
+        captured_message: CapturedMessageWithTime,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         self.open_timeline(
             captured_message.msg.node_namespace,
             captured_message.msg.node_name,
+            captured_message.msg.node_timeline_id,
         )
         .await?;
 
@@ -79,14 +70,9 @@ impl MessageProcessor {
                 local_publisher_graph_id,
             } => {
                 if let Some(local_gid) = local_publisher_graph_id {
-                    let key = TimelineCacheKey {
-                        node_namespace: captured_message.msg.node_namespace,
-                        node_name: captured_message.msg.node_name,
-                    };
-
                     if self
                         .sent_timeline_publisher_metadata
-                        .insert((key, local_gid))
+                        .insert((captured_message.msg.node_timeline_id, local_gid))
                     {
                         let attrs = vec![(
                             self.interned_attr_key(&format!(
@@ -181,26 +167,14 @@ impl MessageProcessor {
     // on the heap after it's allocated, and never goes away.
     async fn open_timeline(
         &mut self,
-        node_namespace: &'static str,
-        node_name: &'static str,
+        node_namespace: String,
+        node_name: String,
+        timeline_id: TimelineId,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let key = TimelineCacheKey {
-            node_namespace,
-            node_name,
-        };
+        self.client.open_timeline(timeline_id).await?;
 
-        // If we have a cached id, just make this the active timeline and be done.
-        if let Some(tl_cache_val) = self.timeline_cache.get(&key) {
-            if self.currently_open_timeline != Some(tl_cache_val.id) {
-                self.client.open_timeline(tl_cache_val.id).await?;
-                self.currently_open_timeline = Some(tl_cache_val.id);
-            }
-        } else {
-            // We haven't seen this timeline before, so allocate an id and send its basic metadata
-            let timeline_id = TimelineId::from(Uuid::new_v4());
-            self.client.open_timeline(timeline_id).await?;
-            self.currently_open_timeline = Some(timeline_id);
-
+        let timeline_is_new = self.created_timelines.insert(timeline_id);
+        if timeline_is_new {
             let mut timeline_name = format!("{node_namespace}/{node_name}");
             while timeline_name.starts_with('/') {
                 timeline_name.remove(0);
@@ -212,9 +186,9 @@ impl MessageProcessor {
             )];
 
             self.client.timeline_metadata(tl_attrs).await?;
-            self.timeline_cache
-                .insert(key, TimelineCacheValue { id: timeline_id });
         }
+
+        self.currently_open_timeline = Some(timeline_id);
 
         Ok(())
     }

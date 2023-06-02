@@ -21,7 +21,6 @@ crossbeam = "0.8"
 widestring = "1"
 url = "2.1"
 tokio = { version = "1", features = ["rt", "sync"] }
-uuid = { version = "1", features = ["v5"] }
 fxhash = "0.2"
 
 modality-api = "0.1"
