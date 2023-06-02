@@ -22,7 +22,13 @@ publisher and subscriber tracing.
   ```bash
   wget -O libmodality_ros_hook.so https://github.com/auxoncorp/modality-ros2/releases/latest/download/libmodality_ros_hook_22.04_amd64.so
   ```
-2. Set `LD_PRELOAD` environment variable prior to running ROS nodes
+2. Install and use the cyclonedds rmw
+  ```bash
+  sudo apt install ros-humble-rmw-cyclonedds-cpp
+
+  export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+  ```
+3. Set `LD_PRELOAD` environment variable prior to running ROS nodes
   ```bash
   export LD_PRELOAD=/path/to/libmodality_ros_hook.so:/opt/ros/humble/lib/librmw_fastrtps_cpp.so
   ```
