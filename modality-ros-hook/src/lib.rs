@@ -294,16 +294,17 @@ impl FlatRosMessageMemberSchema {
                 type_id,
                 offset,
             } => {
-                let val = unsafe { ros_to_attr_val(type_id, message[*offset..].as_ptr())? };
+                if let Some(val_slice) = message.get(*offset..) {
+                    let val = unsafe { ros_to_attr_val(type_id, val_slice.as_ptr())? };
 
-                let key = if let Some(p) = prefix {
-                    format!("{p}.{key}")
-                } else {
-                    key.clone()
-                };
+                    let key = if let Some(p) = prefix {
+                        format!("{p}.{key}")
+                    } else {
+                        key.clone()
+                    };
 
-                //eprintln!("* {key}: {val}");
-                kvs.push((key, val));
+                    kvs.push((key, val));
+                }
             }
 
             FlatRosMessageMemberSchema::ScalarArray {
@@ -315,34 +316,34 @@ impl FlatRosMessageMemberSchema {
                 type_id,
                 offset,
             } => unsafe {
-                // let scalar_array_ptr = usize::from_ne_bytes(slice[0..8].try_into().ok()?) as *const c_void;
-                let slice = &message[*offset..];
-                let scalar_array_ptr = (slice).as_ptr() as *const c_void;
+                if let Some(slice) = message.get(*offset..) {
+                    let scalar_array_ptr = (slice).as_ptr() as *const c_void;
 
-                let seq: *const RosSequence = std::mem::transmute(slice.as_ptr());
+                    let seq: *const RosSequence = std::mem::transmute(slice.as_ptr());
 
-                // This *SHOULD* work. I don't know why it doesn't.
-                // let scalar_array_len = ((*size_function)?)(scalar_array_ptr);
+                    // This *SHOULD* work. I don't know why it doesn't.
+                    // let scalar_array_len = ((*size_function)?)(scalar_array_ptr);
 
-                let scalar_array_len = if *array_size != 0 {
-                    *array_size
-                } else {
-                    (*seq).size
-                };
+                    let scalar_array_len = if *array_size != 0 {
+                        *array_size
+                    } else {
+                        (*seq).size
+                    };
 
-                if scalar_array_len > 12 {
-                    //eprintln!("skipping large array: {scalar_array_len}");
-                    return Some(());
-                }
+                    if scalar_array_len > 12 {
+                        //eprintln!("skipping large array: {scalar_array_len}");
+                        return Some(());
+                    }
 
-                if !scalar_array_ptr.is_null() {
-                    let get_function = (*get_function)?;
+                    if !scalar_array_ptr.is_null() {
+                        let get_function = (*get_function)?;
 
-                    for i in 0..scalar_array_len {
-                        let item_key = format!("{key}.{i}");
-                        let item_ptr = get_function(scalar_array_ptr, i);
-                        let val = ros_to_attr_val(type_id, item_ptr as *const u8)?;
-                        kvs.push((item_key, val));
+                        for i in 0..scalar_array_len {
+                            let item_key = format!("{key}.{i}");
+                            let item_ptr = get_function(scalar_array_ptr, i);
+                            let val = ros_to_attr_val(type_id, item_ptr as *const u8)?;
+                            kvs.push((item_key, val));
+                        }
                     }
                 }
             },
@@ -356,20 +357,20 @@ impl FlatRosMessageMemberSchema {
                 size_function,
                 get_function,
             } => unsafe {
-                let slice = &message[*offset..];
+                if let Some(slice) = message.get(*offset..) {
+                    let seq: *const RosSequence = std::mem::transmute(slice.as_ptr());
+                    let msg_array_len = ((*size_function)?)(seq as _);
 
-                let seq: *const RosSequence = std::mem::transmute(slice.as_ptr());
-                let msg_array_len = ((*size_function)?)(seq as _);
+                    let get_function = (*get_function)?;
 
-                let get_function = (*get_function)?;
-
-                for i in 0..msg_array_len {
-                    let item_key = format!("{key}.{i}");
-                    for item_field_schema in message_schema.members.iter() {
-                        let item_ptr = get_function(slice.as_ptr() as _, i);
-                        let item_slice: &[u8] =
-                            slice::from_raw_parts(item_ptr as _, message_schema.size);
-                        item_field_schema.interpret_message(Some(&item_key), item_slice, kvs);
+                    for i in 0..msg_array_len {
+                        let item_key = format!("{key}.{i}");
+                        for item_field_schema in message_schema.members.iter() {
+                            let item_ptr = get_function(slice.as_ptr() as _, i);
+                            let item_slice: &[u8] =
+                                slice::from_raw_parts(item_ptr as _, message_schema.size);
+                            item_field_schema.interpret_message(Some(&item_key), item_slice, kvs);
+                        }
                     }
                 }
             },

@@ -23,19 +23,20 @@ thread_local! {
 }
 
 lazy_static! {
-    static ref NODES: ArcSwap<rpds::HashTrieMap<NodePtr, NodeState, ArcK>> =
-        // TODO simpler?
-        ArcSwap::from_pointee(Default::default());
+    static ref NODES: ArcSwap<rpds::HashTrieMap<NodePtr, NodeState, ArcK>> = Default::default();
+    static ref PUBLISHERS: ArcSwap<rpds::HashTrieMap<PublisherPtr, PublisherState, ArcK>> = Default::default();
+    static ref SUBSCRIPTIONS: ArcSwap<rpds::HashTrieMap<SubscriptionPtr, SubscriptionState, ArcK>> = Default::default();
 
-    static ref PUBLISHERS: ArcSwap<rpds::HashTrieMap<PublisherPtr, PublisherState, ArcK>> =
-        ArcSwap::from_pointee(Default::default());
-
-    static ref SUBSCRIPTIONS: ArcSwap<rpds::HashTrieMap<SubscriptionPtr, SubscriptionState, ArcK>> =
-        ArcSwap::from_pointee(Default::default());
-
+    static ref IGNORED_TOPICS: ArcSwap<rpds::HashTrieSet<String, ArcK>> = {
+        let topics = rpds::HashTrieSet::default();
+        // TODO make this configurable
+        let topics = topics.insert("/parameter_events".to_string());
+        ArcSwap::new(std::sync::Arc::new(topics))
+    };
 
     static ref SEND_CH: tokio::sync::mpsc::UnboundedSender<CapturedMessageWithTime> = {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel(); // TODO bounded?
+
         std::thread::spawn(|| {
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_io()
@@ -190,7 +191,14 @@ redhook::hook! {
                                    publisher_options: *const c_void) -> PublisherPtr
         => modality_hook_rmw_create_publisher
     {
-        let topic_name_str = String::from_utf8_lossy(CStr::from_ptr(topic_name).to_bytes()).to_string();
+        let topic_name_str = String::from_utf8_lossy(CStr::from_ptr(topic_name).to_bytes()).trim().to_string();
+        if IGNORED_TOPICS.load().contains(&topic_name_str) {
+            // shortcut return for ignored topics
+            return redhook::real!(rmw_create_publisher)
+                (node, type_support, topic_name, qos_policies, publisher_options);
+        }
+
+
         let mut maybe_schema = RosMessageSchema::from_c(type_support);
 
         if let Some(node_state) = NODES.load().get(&node) {
@@ -310,13 +318,19 @@ redhook::hook! {
         => modality_hook_rmw_create_subscription
 
     {
-        let topic_name_str = String::from_utf8_lossy(CStr::from_ptr(topic_name).to_bytes()).to_string();
-        let mut maybe_schema = RosMessageSchema::from_c(type_support);
+        let topic_name_str = String::from_utf8_lossy(CStr::from_ptr(topic_name).to_bytes()).trim().to_string();
+        if IGNORED_TOPICS.load().contains(&topic_name_str) {
+            // shortcut return for ignored topics
+
+            return redhook::real!(rmw_create_subscription)
+                (node, type_support, topic_name, qos_policies, subscription_options);
+        }
 
         if let Some(node_state) = NODES.load().get(&node) {
             let subscription_address = redhook::real!(rmw_create_subscription)
                 (node, type_support, topic_name, qos_policies, subscription_options);
 
+            let mut maybe_schema = RosMessageSchema::from_c(type_support);
             if let Some(message_schema) = maybe_schema.take() {
                 SUBSCRIPTIONS.rcu(|subs| {
                     subs.insert(
@@ -365,9 +379,6 @@ redhook::hook! {
                 let mut kvs = vec![];
                 sub_state.message_schema.interpret_message(None, src_message_bytes, &mut kvs);
 
-                // cast away the lifetime; these are in fact valid for
-                // 'static because the strings are in a global registry,
-                // which is a grow-only persistent data structure.
                 let topic_name = sub_state.topic_name.clone();
                 let node_namespace = sub_state.node_namespace.clone();
                 let node_name = sub_state.node_name.clone();
