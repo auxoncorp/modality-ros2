@@ -52,24 +52,30 @@ impl MessageProcessor {
         )
         .await?;
 
-        let mut event_name = captured_message.msg.topic_name.to_string();
-        if event_name.starts_with('/') {
-            event_name.remove(0);
+        let mut event_attrs = vec![(
+            self.interned_attr_key("event.ros.topic").await?,
+            AttrVal::String(captured_message.msg.topic_name.clone()),
+        )];
+
+        let kvs = &captured_message.msg.kvs;
+        if !kvs.iter().any(|(k, _)| k == "name") {
+            // If there's no incoming event name, use a normalized version of the topic name
+            let mut event_name = captured_message.msg.topic_name.to_string();
+            if event_name.starts_with('/') {
+                event_name.remove(0);
+            }
+            event_attrs.push((
+                self.interned_attr_key("event.name").await?,
+                AttrVal::String(event_name),
+            ));
         }
 
         // http://wiki.ros.org/Names claims that names can't have '.' in them
-        let normalized_topic_name = event_name.replace('/', ".");
-
-        let mut event_attrs = vec![
-            (
-                self.interned_attr_key("event.name").await?,
-                AttrVal::String(event_name),
-            ),
-            (
-                self.interned_attr_key("event.ros.topic").await?,
-                AttrVal::String(captured_message.msg.topic_name),
-            ),
-        ];
+        let mut normalized_topic_name = captured_message.msg.topic_name.clone();
+        if normalized_topic_name.starts_with('/') {
+            normalized_topic_name.remove(0);
+        }
+        let normalized_topic_name = normalized_topic_name.replace('/', ".");
 
         match captured_message.msg.direction {
             MessageDirection::Send {

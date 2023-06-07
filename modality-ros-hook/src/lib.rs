@@ -300,7 +300,14 @@ impl FlatRosMessageSchema {
                     AttrVal::String(self.name.clone()),
                 ),
             ];
+
             self.interpret_message_internal(None, message, &mut kvs);
+
+            if let Some(msg) = extract_log_message(self, &kvs) {
+                println!("---> {msg}");
+                kvs.push(("name".to_string(), msg));
+            }
+
             itertools::Either::Right(std::iter::once(kvs))
         }
     }
@@ -398,8 +405,6 @@ impl FlatRosMessageSchema {
     }
 }
 
-
-
 /// Throw away anything non-alphanumeric. Join strings of alphanumeric
 /// characters together with underscores. Lowercase the whole thing.
 fn normalize_string_for_attr_key(s: String) -> String {
@@ -444,6 +449,25 @@ fn as_values_field(member: &FlatRosMessageMemberSchema) -> Option<&MessageSequen
         }
         _ => None,
     }
+}
+
+fn extract_log_message(
+    schema: &FlatRosMessageSchema,
+    kvs: &[(String, AttrVal)],
+) -> Option<AttrVal> {
+    println!(
+        "--> extract_log_message {} {}",
+        schema.namespace, schema.name
+    );
+    if schema.namespace == "rcl_interfaces__msg" && schema.name == "Log" {
+        println!("--> match! kvs: {kvs:?}");
+        if let Some((_, msg)) = kvs.iter().find(|(k, _)| k == "msg") {
+            println!("--> Found msg {msg}");
+            return Some(msg.clone());
+        }
+    }
+
+    None
 }
 
 impl FlatRosMessageMemberSchema {
