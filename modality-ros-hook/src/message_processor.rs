@@ -60,15 +60,26 @@ impl MessageProcessor {
         // http://wiki.ros.org/Names claims that names can't have '.' in them
         let normalized_topic_name = event_name.replace('/', ".");
 
-        let mut event_attrs = vec![(
-            self.interned_attr_key("event.name").await?,
-            AttrVal::String(event_name),
-        )];
+        let mut event_attrs = vec![
+            (
+                self.interned_attr_key("event.name").await?,
+                AttrVal::String(event_name),
+            ),
+            (
+                self.interned_attr_key("event.ros.topic").await?,
+                AttrVal::String(captured_message.msg.topic_name),
+            ),
+        ];
 
         match captured_message.msg.direction {
             MessageDirection::Send {
                 local_publisher_graph_id,
             } => {
+                event_attrs.push((
+                    self.interned_attr_key("event.ros.publish").await?,
+                    AttrVal::Bool(true),
+                ));
+
                 if let Some(local_gid) = local_publisher_graph_id {
                     if self
                         .sent_timeline_publisher_metadata
@@ -110,6 +121,11 @@ impl MessageProcessor {
             MessageDirection::Receive {
                 remote_publisher_graph_id,
             } => {
+                event_attrs.push((
+                    self.interned_attr_key("event.ros.receive").await?,
+                    AttrVal::Bool(true),
+                ));
+
                 if let Some(t) = captured_message.publish_time.to_epoch_nanos() {
                     event_attrs.push((
                         self.interned_attr_key("event.interaction.remote_event.timestamp")
@@ -180,10 +196,25 @@ impl MessageProcessor {
                 timeline_name.remove(0);
             }
 
-            let tl_attrs = vec![(
-                self.interned_attr_key("timeline.name").await?,
-                AttrVal::String(timeline_name),
-            )];
+            let tl_attrs = vec![
+                (
+                    self.interned_attr_key("timeline.name").await?,
+                    AttrVal::String(timeline_name),
+                ),
+                (
+                    self.interned_attr_key("timeline.ros.node.name").await?,
+                    AttrVal::String(node_name.clone()),
+                ),
+                (
+                    self.interned_attr_key("timeline.ros.node.namespace")
+                        .await?,
+                    AttrVal::String(node_namespace.clone()),
+                ),
+                (
+                    self.interned_attr_key("timeline.ros.node").await?,
+                    AttrVal::String(format!("{}/{}", node_namespace, node_name)),
+                ),
+            ];
 
             self.client.timeline_metadata(tl_attrs).await?;
         }

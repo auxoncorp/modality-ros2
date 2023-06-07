@@ -19,7 +19,7 @@ thread_local! {
     /// thread (called by the DDS layer for the transport-level
     /// timestamp), we capture the time, add it to the message, and put
     /// it on SEND_CH for processing.
-    pub static LAST_CAPTURED_MESSAGE: RefCell<Option<CapturedMessage>> = RefCell::new(None);
+    pub static LAST_CAPTURED_MESSAGE: RefCell<Option<Vec<CapturedMessage>>> = RefCell::new(None);
 }
 
 lazy_static! {
@@ -254,18 +254,21 @@ redhook::hook! {
         if let Some(pub_state) = PUBLISHERS.load().get(&publisher_address) {
             let message_size = pub_state.message_schema.size;
             let src_message_bytes: &[u8] = std::slice::from_raw_parts(message as *const u8, message_size);
-            let mut kvs = vec![];
-            pub_state.message_schema.interpret_message(None, src_message_bytes, &mut kvs);
 
-            let topic_name = pub_state.topic_name.clone();
-            let node_namespace = pub_state.node_namespace.clone();
-            let node_name = pub_state.node_name.clone();
-            let node_timeline_id = pub_state.node_timeline_id;
+            let mut captured_messages = vec![];
+            for kvs in pub_state.message_schema.interpret_message(src_message_bytes) {
+                let topic_name = pub_state.topic_name.clone();
+                let node_namespace = pub_state.node_namespace.clone();
+                let node_name = pub_state.node_name.clone();
+                let node_timeline_id = pub_state.node_timeline_id;
 
-            let direction = MessageDirection::Send { local_publisher_graph_id: pub_state.graph_id };
-            let captured_message = CapturedMessage { kvs, topic_name, node_namespace, node_name, direction, node_timeline_id };
+                let direction = MessageDirection::Send { local_publisher_graph_id: pub_state.graph_id };
+                let captured_message = CapturedMessage { kvs, topic_name, node_namespace, node_name, direction, node_timeline_id };
+                captured_messages.push(captured_message);
+            }
+
             let _called_after_dest = LAST_CAPTURED_MESSAGE.try_with(|lcm| {
-                *lcm.borrow_mut() = Some(captured_message);
+                *lcm.borrow_mut() = Some(captured_messages);
             }).is_err();
         }
 
@@ -291,18 +294,19 @@ redhook::hook! {
         // 0 means success
         if res == 0 {
             let _called_after_dest = LAST_CAPTURED_MESSAGE.try_with(|b| {
-                if let Some(msg) = b.borrow_mut().take() {
-                    let msg_with_time = CapturedMessageWithTime {
-                        msg,
-                        publish_time: CapturedTime::Compound { sec: (*timespec).tv_sec, nsec: (*timespec).tv_nsec },
-                        receive_time: None
-                    };
-
-                    // intentionally ignore errors here. This will
-                    // fail if the rx thread is dead, but in that case
-                    // a message has already been printed, and this
-                    // would just be belaboring the point, repeatedly.
-                    let _ = SEND_CH.send(msg_with_time);
+                if let Some(msgs) = b.borrow_mut().take() {
+                    for msg in msgs.into_iter() {
+                        let msg_with_time = CapturedMessageWithTime {
+                            msg,
+                            publish_time: CapturedTime::Compound { sec: (*timespec).tv_sec, nsec: (*timespec).tv_nsec },
+                            receive_time: None
+                        };
+                        // intentionally ignore errors here. This will
+                        // fail if the rx thread is dead, but in that case
+                        // a message has already been printed, and this
+                        // would just be belaboring the point, repeatedly.
+                        let _ = SEND_CH.send(msg_with_time);
+                    }
                 }
             }).is_err();
         }
@@ -376,28 +380,27 @@ redhook::hook! {
             if let Some(sub_state) = SUBSCRIPTIONS.load().get(&subscription_address) {
                 let message_size = sub_state.message_schema.size;
                 let src_message_bytes: &[u8] = std::slice::from_raw_parts(message as *const u8, message_size);
-                let mut kvs = vec![];
-                sub_state.message_schema.interpret_message(None, src_message_bytes, &mut kvs);
+                for kvs in sub_state.message_schema.interpret_message(src_message_bytes) {
+                    let topic_name = sub_state.topic_name.clone();
+                    let node_namespace = sub_state.node_namespace.clone();
+                    let node_name = sub_state.node_name.clone();
+                    let node_timeline_id = sub_state.node_timeline_id;
 
-                let topic_name = sub_state.topic_name.clone();
-                let node_namespace = sub_state.node_namespace.clone();
-                let node_name = sub_state.node_name.clone();
-                let node_timeline_id = sub_state.node_timeline_id;
+                    let remote_publisher_graph_id = Some(PublisherGraphId((*message_info).publisher_gid.data));
+                    let direction = MessageDirection::Receive { remote_publisher_graph_id };
 
-                let remote_publisher_graph_id = Some(PublisherGraphId((*message_info).publisher_gid.data));
-                let direction = MessageDirection::Receive { remote_publisher_graph_id };
+                    let msg = CapturedMessageWithTime {
+                        msg: CapturedMessage { kvs, topic_name, node_namespace, node_name, direction, node_timeline_id },
+                        publish_time: CapturedTime::SignedEpochNanos((*message_info).source_timestamp),
+                        receive_time: Some(CapturedTime::SignedEpochNanos((*message_info).received_timestamp)),
+                    };
 
-                let msg = CapturedMessageWithTime {
-                    msg: CapturedMessage { kvs, topic_name, node_namespace, node_name, direction, node_timeline_id },
-                    publish_time: CapturedTime::SignedEpochNanos((*message_info).source_timestamp),
-                    receive_time: Some(CapturedTime::SignedEpochNanos((*message_info).received_timestamp)),
-                };
-
-                // intentionally ignore errors here. This will fail if
-                // the rx thread is dead, but in that case a message
-                // has already been printed, and this would just be
-                // belaboring the point, repeatedly.
-                let _ = SEND_CH.send(msg);
+                    // intentionally ignore errors here. This will fail if
+                    // the rx thread is dead, but in that case a message
+                    // has already been printed, and this would just be
+                    // belaboring the point, repeatedly.
+                    let _ = SEND_CH.send(msg);
+                }
             }
         }
 

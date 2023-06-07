@@ -5,6 +5,7 @@ use interop::{
     RosIdlRuntimeCString, RosIdlRuntimeWString, RosIdlTypesupportIntrospectionCFieldTypes,
     RosSequence,
 };
+use itertools::Itertools;
 use modality_api::{AttrVal, BigInt};
 
 mod hooks;
@@ -14,10 +15,10 @@ mod message_processor;
 #[derive(Debug, Clone)]
 #[allow(unused)]
 pub struct RosMessageSchema {
-    namespace: String,
-    name: String,
-    size: usize,
-    members: Vec<RosMessageMemberSchema>,
+    pub namespace: String,
+    pub name: String,
+    pub size: usize,
+    pub members: Vec<RosMessageMemberSchema>,
 }
 
 #[derive(Debug, Clone)]
@@ -53,29 +54,38 @@ pub struct FlatRosMessageSchema {
 
 #[derive(Debug, Clone)]
 pub enum FlatRosMessageMemberSchema {
-    Scalar {
-        key: String,
-        type_id: RosIdlTypesupportIntrospectionCFieldTypes,
-        offset: usize,
-    },
-    ScalarArray {
-        key: String,
-        type_id: RosIdlTypesupportIntrospectionCFieldTypes,
-        offset: usize,
-        array_size: usize,
-        is_upper_bound: bool,
-        size_function: Option<fn(*const c_void) -> usize>,
-        get_function: Option<fn(*const c_void, usize) -> *const c_void>,
-    },
-    MessageSequence {
-        key: String,
-        offset: usize,
-        message_schema: FlatRosMessageSchema,
-        array_size: usize,
-        is_upper_bound: bool,
-        size_function: Option<fn(*const c_void) -> usize>,
-        get_function: Option<fn(*const c_void, usize) -> *const c_void>,
-    },
+    Scalar(ScalarMemberSchema),
+    ScalarArray(ScalarArrayMemberSchema),
+    MessageSequence(MessageSequenceMemberSchema),
+}
+
+#[derive(Debug, Clone)]
+pub struct ScalarMemberSchema {
+    pub key: String,
+    pub type_id: RosIdlTypesupportIntrospectionCFieldTypes,
+    pub offset: usize,
+}
+
+#[derive(Debug, Clone)]
+pub struct ScalarArrayMemberSchema {
+    pub key: String,
+    pub type_id: RosIdlTypesupportIntrospectionCFieldTypes,
+    pub offset: usize,
+    pub array_size: usize,
+    pub is_upper_bound: bool,
+    pub size_function: Option<fn(*const c_void) -> usize>,
+    pub get_function: Option<fn(*const c_void, usize) -> *const c_void>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MessageSequenceMemberSchema {
+    pub key: String,
+    pub offset: usize,
+    pub message_schema: FlatRosMessageSchema,
+    pub array_size: usize,
+    pub is_upper_bound: bool,
+    pub size_function: Option<fn(*const c_void) -> usize>,
+    pub get_function: Option<fn(*const c_void, usize) -> *const c_void>,
 }
 
 impl RosMessageSchema {
@@ -198,11 +208,11 @@ impl RosMessageMemberSchema {
             } => {
                 let mut name_segs = prefix.clone();
                 name_segs.push(name);
-                target.push(FlatRosMessageMemberSchema::Scalar {
+                target.push(FlatRosMessageMemberSchema::Scalar(ScalarMemberSchema {
                     key: name_segs.join("."),
                     type_id,
                     offset: initial_offset + offset,
-                })
+                }))
             }
             RosMessageMemberSchema::Array {
                 item_schema,
@@ -219,15 +229,17 @@ impl RosMessageMemberSchema {
                 } => {
                     let mut name_segs = prefix.clone();
                     name_segs.push(name);
-                    target.push(FlatRosMessageMemberSchema::ScalarArray {
-                        key: name_segs.join("."),
-                        type_id,
-                        offset,
-                        array_size,
-                        is_upper_bound,
-                        size_function,
-                        get_function,
-                    })
+                    target.push(FlatRosMessageMemberSchema::ScalarArray(
+                        ScalarArrayMemberSchema {
+                            key: name_segs.join("."),
+                            type_id,
+                            offset,
+                            array_size,
+                            is_upper_bound,
+                            size_function,
+                            get_function,
+                        },
+                    ))
                 }
                 RosMessageMemberSchema::NestedMessage {
                     name,
@@ -239,15 +251,17 @@ impl RosMessageMemberSchema {
 
                     let message_schema = schema.flatten(prefix);
 
-                    target.push(FlatRosMessageMemberSchema::MessageSequence {
-                        key: name_segs.join("."),
-                        offset,
-                        message_schema,
-                        array_size,
-                        is_upper_bound,
-                        size_function,
-                        get_function,
-                    })
+                    target.push(FlatRosMessageMemberSchema::MessageSequence(
+                        MessageSequenceMemberSchema {
+                            key: name_segs.join("."),
+                            offset,
+                            message_schema,
+                            array_size,
+                            is_upper_bound,
+                            size_function,
+                            get_function,
+                        },
+                    ))
                 }
                 RosMessageMemberSchema::Array { .. } => {
                     unreachable!()
@@ -269,7 +283,29 @@ impl RosMessageMemberSchema {
 }
 
 impl FlatRosMessageSchema {
-    fn interpret_message(
+    fn interpret_message<'a>(
+        &'a self,
+        message: &'a [u8],
+    ) -> impl Iterator<Item = Vec<(String, AttrVal)>> + 'a {
+        if self.namespace == "diagnostic_msgs::msg" && self.name == "DiagnosticArray" {
+            itertools::Either::Left(self.interepret_as_diagnostic_array(message))
+        } else {
+            let mut kvs = vec![
+                (
+                    "event.ros.schema.namespace".to_string(),
+                    AttrVal::String(self.namespace.clone()),
+                ),
+                (
+                    "event.ros.schema.name".to_string(),
+                    AttrVal::String(self.name.clone()),
+                ),
+            ];
+            self.interpret_message_internal(None, message, &mut kvs);
+            itertools::Either::Right(std::iter::once(kvs))
+        }
+    }
+
+    fn interpret_message_internal(
         &self,
         prefix: Option<&str>,
         message: &[u8],
@@ -278,6 +314,135 @@ impl FlatRosMessageSchema {
         for member in self.members.iter() {
             let _ = member.interpret_message(prefix, message, kvs);
         }
+    }
+
+    /// Special handling for the 'DiagnosticArray' type; it has a bunch of 'status'
+    /// items in an array, and we want each of those to be emitted as a top-level event.
+    fn interepret_as_diagnostic_array<'a>(
+        &'a self,
+        message: &'a [u8],
+    ) -> impl Iterator<Item = Vec<(String, AttrVal)>> + 'a {
+        let mut common_kvs = vec![
+            (
+                "event.ros.schema.namespace".to_string(),
+                AttrVal::String(self.namespace.clone()),
+            ),
+            (
+                "event.ros.schema.name".to_string(),
+                AttrVal::String(self.name.clone()),
+            ),
+        ];
+        for member in self.members.iter() {
+            // Repeat the members outside of the status field for every event
+            if as_status_field(member).is_none() {
+                let _ = member.interpret_message(None, message, &mut common_kvs);
+            }
+        }
+
+        // We're going to emit a whole event for each item in the status array
+        let mut events = vec![];
+        let status_prefix = None;
+
+        if let Some(status_schema) = self.members.iter().find_map(as_status_field) {
+            status_schema.for_each_item(message, |_, status_item_slice| {
+                let mut kvs = common_kvs.clone();
+
+                // Take the members of this particular status item.
+                for item_field_schema in status_schema.message_schema.members.iter() {
+                    if let Some(values_schema) = as_values_field(item_field_schema) {
+                        values_schema.for_each_item(status_item_slice, |_, kv_item_slice| {
+                            let mut local_attr_kvs = vec![];
+                            values_schema.message_schema.interpret_message_internal(
+                                None,
+                                kv_item_slice,
+                                &mut local_attr_kvs,
+                            );
+
+                            if let (Some((_, k)), Some((_, v))) = (
+                                local_attr_kvs.iter().find(|t| t.0 == "key"),
+                                local_attr_kvs.iter().find(|t| t.0 == "value"),
+                            ) {
+                                // TODO more complete key normalization
+                                let ks = normalize_string_for_attr_key(k.to_string());
+                                kvs.push((ks.clone(), v.clone()));
+                                kvs.push((format!("{ks}.key"), AttrVal::String(k.to_string())));
+                            } else {
+                                // TODO ???
+                            }
+
+                            Some(())
+
+                            // status.values.buffer_overruns=0
+                            // status.values.buffer_overruns.key = "Buffer overruns"
+                        });
+                    } else {
+                        item_field_schema.interpret_message(
+                            status_prefix,
+                            status_item_slice,
+                            &mut kvs,
+                        )?;
+                    }
+                }
+
+                events.push(kvs);
+                Some(())
+            });
+        } else {
+            // This could happen if the schema changes. I guess just
+            // emit a single event with the common attrs, which should
+            // include any new stuff we didn't special case.
+            events.push(common_kvs);
+        }
+
+        events.into_iter()
+    }
+}
+
+
+
+/// Throw away anything non-alphanumeric. Join strings of alphanumeric
+/// characters together with underscores. Lowercase the whole thing.
+fn normalize_string_for_attr_key(s: String) -> String {
+    let mut parts = s.split(|c: char| !c.is_alphanumeric());
+    parts.join("_").to_lowercase()
+}
+
+fn as_status_field(member: &FlatRosMessageMemberSchema) -> Option<&MessageSequenceMemberSchema> {
+    match member {
+        FlatRosMessageMemberSchema::MessageSequence(
+            seq @ MessageSequenceMemberSchema {
+                key,
+                message_schema:
+                    FlatRosMessageSchema {
+                        namespace, name, ..
+                    },
+                ..
+            },
+        ) if key == "status"
+            && namespace == "diagnostic_msgs::msg"
+            && name == "DiagnosticStatus" =>
+        {
+            Some(seq)
+        }
+        _ => None,
+    }
+}
+
+fn as_values_field(member: &FlatRosMessageMemberSchema) -> Option<&MessageSequenceMemberSchema> {
+    match member {
+        FlatRosMessageMemberSchema::MessageSequence(
+            seq @ MessageSequenceMemberSchema {
+                key,
+                message_schema:
+                    FlatRosMessageSchema {
+                        namespace, name, ..
+                    },
+                ..
+            },
+        ) if key == "values" && namespace == "diagnostic_msgs::msg" && name == "KeyValue" => {
+            Some(seq)
+        }
+        _ => None,
     }
 }
 
@@ -289,94 +454,146 @@ impl FlatRosMessageMemberSchema {
         kvs: &mut Vec<(String, AttrVal)>,
     ) -> Option<()> {
         match self {
-            FlatRosMessageMemberSchema::Scalar {
-                key,
-                type_id,
-                offset,
-            } => {
-                if let Some(val_slice) = message.get(*offset..) {
-                    let val = unsafe { ros_to_attr_val(type_id, val_slice.as_ptr())? };
-
-                    let key = if let Some(p) = prefix {
-                        format!("{p}.{key}")
-                    } else {
-                        key.clone()
-                    };
-
-                    kvs.push((key, val));
-                }
+            FlatRosMessageMemberSchema::Scalar(s) => s.interpret_message(prefix, message, kvs),
+            FlatRosMessageMemberSchema::ScalarArray(s) => s.interpret_message(prefix, message, kvs),
+            FlatRosMessageMemberSchema::MessageSequence(s) => {
+                s.interpret_message(prefix, message, kvs)
             }
+        }
+    }
+}
 
-            FlatRosMessageMemberSchema::ScalarArray {
-                key,
-                array_size,
-                is_upper_bound: _,
-                size_function: _,
-                get_function,
-                type_id,
-                offset,
-            } => unsafe {
-                if let Some(slice) = message.get(*offset..) {
-                    let scalar_array_ptr = (slice).as_ptr() as *const c_void;
+impl ScalarMemberSchema {
+    fn interpret_message(
+        &self,
+        prefix: Option<&str>,
+        message: &[u8],
+        kvs: &mut Vec<(String, AttrVal)>,
+    ) -> Option<()> {
+        let ScalarMemberSchema {
+            key,
+            type_id,
+            offset,
+        } = &self;
 
-                    let seq: *const RosSequence = std::mem::transmute(slice.as_ptr());
+        if let Some(val_slice) = message.get(*offset..) {
+            let val = unsafe { ros_to_attr_val(type_id, val_slice.as_ptr())? };
 
-                    // This *SHOULD* work. I don't know why it doesn't.
-                    // let scalar_array_len = ((*size_function)?)(scalar_array_ptr);
+            let key = if let Some(p) = prefix {
+                format!("{p}.{key}")
+            } else {
+                key.clone()
+            };
 
-                    let scalar_array_len = if *array_size != 0 {
-                        *array_size
-                    } else {
-                        (*seq).size
-                    };
-
-                    if scalar_array_len > 12 {
-                        //eprintln!("skipping large array: {scalar_array_len}");
-                        return Some(());
-                    }
-
-                    if !scalar_array_ptr.is_null() {
-                        let get_function = (*get_function)?;
-
-                        for i in 0..scalar_array_len {
-                            let item_key = format!("{key}.{i}");
-                            let item_ptr = get_function(scalar_array_ptr, i);
-                            let val = ros_to_attr_val(type_id, item_ptr as *const u8)?;
-                            kvs.push((item_key, val));
-                        }
-                    }
-                }
-            },
-
-            FlatRosMessageMemberSchema::MessageSequence {
-                key,
-                offset,
-                message_schema,
-                array_size: _,
-                is_upper_bound: _,
-                size_function,
-                get_function,
-            } => unsafe {
-                if let Some(slice) = message.get(*offset..) {
-                    let seq: *const RosSequence = std::mem::transmute(slice.as_ptr());
-                    let msg_array_len = ((*size_function)?)(seq as _);
-
-                    let get_function = (*get_function)?;
-
-                    for i in 0..msg_array_len {
-                        let item_key = format!("{key}.{i}");
-                        for item_field_schema in message_schema.members.iter() {
-                            let item_ptr = get_function(slice.as_ptr() as _, i);
-                            let item_slice: &[u8] =
-                                slice::from_raw_parts(item_ptr as _, message_schema.size);
-                            item_field_schema.interpret_message(Some(&item_key), item_slice, kvs);
-                        }
-                    }
-                }
-            },
+            kvs.push((key, val));
         }
 
         Some(())
+    }
+}
+
+impl ScalarArrayMemberSchema {
+    fn interpret_message(
+        &self,
+        prefix: Option<&str>,
+        message: &[u8],
+        kvs: &mut Vec<(String, AttrVal)>,
+    ) -> Option<()> {
+        let ScalarArrayMemberSchema {
+            key,
+            array_size,
+            is_upper_bound: _,
+            size_function: _,
+            get_function,
+            type_id,
+            offset,
+        } = &self;
+
+        unsafe {
+            if let Some(slice) = message.get(*offset..) {
+                let scalar_array_ptr = (slice).as_ptr() as *const c_void;
+
+                let seq: *const RosSequence = std::mem::transmute(slice.as_ptr());
+
+                // This *SHOULD* work. I don't know why it doesn't.
+                // let scalar_array_len = ((*size_function)?)(scalar_array_ptr);
+
+                let scalar_array_len = if *array_size != 0 {
+                    *array_size
+                } else {
+                    (*seq).size
+                };
+
+                if scalar_array_len > 12 {
+                    //eprintln!("skipping large array: {scalar_array_len}");
+                    return Some(());
+                }
+
+                if !scalar_array_ptr.is_null() {
+                    let get_function = (*get_function)?;
+
+                    for i in 0..scalar_array_len {
+                        let item_key = if let Some(p) = prefix {
+                            format!("{p}.{key}.{i}")
+                        } else {
+                            format!("{key}.{i}")
+                        };
+                        let item_ptr = get_function(scalar_array_ptr, i);
+                        let val = ros_to_attr_val(type_id, item_ptr as *const u8)?;
+                        kvs.push((item_key, val));
+                    }
+                }
+            }
+
+            Some(())
+        }
+    }
+}
+
+impl MessageSequenceMemberSchema {
+    fn interpret_message(
+        &self,
+        prefix: Option<&str>,
+        message: &[u8],
+        kvs: &mut Vec<(String, AttrVal)>,
+    ) -> Option<()> {
+        self.for_each_item(message, |i, item_slice| {
+            let item_key = if let Some(p) = prefix {
+                format!("{p}.{}.{i}", self.key)
+            } else {
+                format!("{}.{i}", self.key)
+            };
+
+            for item_field_schema in self.message_schema.members.iter() {
+                item_field_schema.interpret_message(Some(&item_key), item_slice, kvs)?;
+            }
+
+            Some(())
+        })
+    }
+
+    /// Call `f` once for each message in the sequence. It will be
+    /// passed a 'message' slice at the the proper offset.
+    fn for_each_item(
+        &self,
+        message: &[u8],
+        mut f: impl FnMut(usize, &[u8]) -> Option<()>,
+    ) -> Option<()> {
+        unsafe {
+            if let Some(slice) = message.get(self.offset..) {
+                let seq: *const RosSequence = std::mem::transmute(slice.as_ptr());
+                let msg_array_len = ((self.size_function)?)(seq as _);
+                let get_function = self.get_function?;
+
+                for i in 0..msg_array_len {
+                    let item_ptr = get_function(slice.as_ptr() as _, i);
+                    let item_slice: &[u8] =
+                        slice::from_raw_parts(item_ptr as _, self.message_schema.size);
+                    f(i, item_slice)?;
+                }
+            }
+            Some(())
+        }
     }
 }
 

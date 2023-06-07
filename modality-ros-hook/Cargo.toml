@@ -17,11 +17,10 @@ lazy_static = "1.4"
 rpds = "0.12"
 archery = "0.4"
 arc-swap = "1.6"
-crossbeam = "0.8"
 widestring = "1"
-url = "2.1"
 tokio = { version = "1", features = ["rt", "sync"] }
 fxhash = "0.2"
+itertools = "0.10"
 
 modality-api = "0.1"
 modality-ingest-client = "0.2"
