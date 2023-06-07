@@ -304,7 +304,6 @@ impl FlatRosMessageSchema {
             self.interpret_message_internal(None, message, &mut kvs);
 
             if let Some(msg) = extract_log_message(self, &kvs) {
-                println!("---> {msg}");
                 kvs.push(("name".to_string(), msg));
             }
 
@@ -455,14 +454,8 @@ fn extract_log_message(
     schema: &FlatRosMessageSchema,
     kvs: &[(String, AttrVal)],
 ) -> Option<AttrVal> {
-    println!(
-        "--> extract_log_message {} {}",
-        schema.namespace, schema.name
-    );
     if schema.namespace == "rcl_interfaces__msg" && schema.name == "Log" {
-        println!("--> match! kvs: {kvs:?}");
         if let Some((_, msg)) = kvs.iter().find(|(k, _)| k == "msg") {
-            println!("--> Found msg {msg}");
             return Some(msg.clone());
         }
     }
