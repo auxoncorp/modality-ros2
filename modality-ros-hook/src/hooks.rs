@@ -34,7 +34,7 @@ lazy_static! {
         ArcSwap::new(std::sync::Arc::new(topics))
     };
 
-    static ref SEND_CH: tokio::sync::mpsc::UnboundedSender<CapturedMessageWithTime> = {
+    static ref SEND_CH: tokio::sync::mpsc::UnboundedSender<RosEvent> = {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel(); // TODO bounded?
 
         std::thread::spawn(|| {
@@ -109,6 +109,178 @@ struct SubscriptionState {
     node_timeline_id: TimelineId,
 }
 
+pub enum RosEvent {
+    Message(CapturedMessageWithTime),
+    Rmw(RmwEvent),
+}
+
+impl From<CapturedMessageWithTime> for RosEvent {
+    fn from(value: CapturedMessageWithTime) -> Self {
+        RosEvent::Message(value)
+    }
+}
+
+impl From<RmwEvent> for RosEvent {
+    fn from(value: RmwEvent) -> Self {
+        RosEvent::Rmw(value)
+    }
+}
+
+pub enum RmwEvent {
+    CreateNode {
+        node_namespace: String,
+        node_name: String,
+        node_timeline_id: TimelineId,
+        timestamp: Option<Nanoseconds>,
+    },
+    DestroyNode {
+        node_timeline_id: TimelineId,
+        timestamp: Option<Nanoseconds>,
+    },
+    CreatePublisher {
+        node_timeline_id: TimelineId,
+        timestamp: Option<Nanoseconds>,
+        gid: Option<PublisherGraphId>,
+        topic: String,
+        schema_namespace: String,
+        schema_name: String,
+    },
+    DestroyPublisher {
+        node_timeline_id: TimelineId,
+        timestamp: Option<Nanoseconds>,
+        gid: Option<PublisherGraphId>,
+    },
+    CreateSubscription {
+        node_timeline_id: TimelineId,
+        timestamp: Option<Nanoseconds>,
+        topic: String,
+        schema_namespace: String,
+        schema_name: String,
+    },
+    DestroySubscription {
+        node_timeline_id: TimelineId,
+        timestamp: Option<Nanoseconds>,
+        topic: String,
+    },
+}
+
+fn now() -> Option<Nanoseconds> {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| {
+            let n: Option<u64> = d.as_nanos().try_into().ok();
+            n.map(Nanoseconds::from)
+        })
+}
+
+impl RmwEvent {
+    pub fn create_node(
+        node_namespace: String,
+        node_name: String,
+        node_timeline_id: TimelineId,
+    ) -> RmwEvent {
+        RmwEvent::CreateNode {
+            node_namespace,
+            node_name,
+            node_timeline_id,
+            timestamp: now(),
+        }
+    }
+
+    pub fn destroy_node(node_timeline_id: TimelineId) -> RmwEvent {
+        RmwEvent::DestroyNode {
+            node_timeline_id,
+            timestamp: now(),
+        }
+    }
+
+    pub fn create_publisher(
+        node_timeline_id: TimelineId,
+        gid: Option<PublisherGraphId>,
+        topic: String,
+        schema_namespace: String,
+        schema_name: String,
+    ) -> RmwEvent {
+        RmwEvent::CreatePublisher {
+            node_timeline_id,
+            timestamp: now(),
+            gid,
+            topic,
+            schema_namespace,
+            schema_name,
+        }
+    }
+
+    pub fn destroy_publisher(
+        node_timeline_id: TimelineId,
+        gid: Option<PublisherGraphId>,
+    ) -> RmwEvent {
+        RmwEvent::DestroyPublisher {
+            node_timeline_id,
+            timestamp: now(),
+            gid,
+        }
+    }
+
+    pub fn create_subscription(
+        node_timeline_id: TimelineId,
+        topic: String,
+        schema_namespace: String,
+        schema_name: String,
+    ) -> RmwEvent {
+        RmwEvent::CreateSubscription {
+            node_timeline_id,
+            timestamp: now(),
+            topic,
+            schema_namespace,
+            schema_name,
+        }
+    }
+
+    pub fn destroy_subscription(node_timeline_id: TimelineId, topic: String) -> RmwEvent {
+        RmwEvent::DestroySubscription {
+            node_timeline_id,
+            timestamp: now(),
+            topic,
+        }
+    }
+
+    pub fn timeline_id(&self) -> &TimelineId {
+        match self {
+            RmwEvent::CreateNode {
+                node_timeline_id, ..
+            } => node_timeline_id,
+            RmwEvent::DestroyNode {
+                node_timeline_id, ..
+            } => node_timeline_id,
+            RmwEvent::CreatePublisher {
+                node_timeline_id, ..
+            } => node_timeline_id,
+            RmwEvent::DestroyPublisher {
+                node_timeline_id, ..
+            } => node_timeline_id,
+            RmwEvent::CreateSubscription {
+                node_timeline_id, ..
+            } => node_timeline_id,
+            RmwEvent::DestroySubscription {
+                node_timeline_id, ..
+            } => node_timeline_id,
+        }
+    }
+
+    pub fn timestamp(&self) -> &Option<Nanoseconds> {
+        match self {
+            RmwEvent::CreateNode { timestamp, .. } => timestamp,
+            RmwEvent::DestroyNode { timestamp, .. } => timestamp,
+            RmwEvent::CreatePublisher { timestamp, .. } => timestamp,
+            RmwEvent::DestroyPublisher { timestamp, .. } => timestamp,
+            RmwEvent::CreateSubscription { timestamp, .. } => timestamp,
+            RmwEvent::DestroySubscription { timestamp, .. } => timestamp,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct CapturedMessage {
     pub kvs: Vec<(String, AttrVal)>,
@@ -171,6 +343,8 @@ redhook::hook! {
                 name: node_name.clone(), namespace: node_namespace.clone(), timeline_id: node_timeline_id })
         });
 
+        let _ = SEND_CH.send(RmwEvent::create_node(node_namespace, node_name, node_timeline_id).into());
+
         node_address
     }
 }
@@ -179,8 +353,14 @@ redhook::hook! {
     unsafe fn rmw_destroy_node(node_ptr: NodePtr) -> c_int
         => modality_hook_rmw_destroy_node
     {
+
+        if let Some(node_state) = NODES.load().get(&node_ptr) {
+            let _ = SEND_CH.send(RmwEvent::destroy_node(node_state.timeline_id).into());
+        }
+
         let ret = redhook::real!(rmw_destroy_node)(node_ptr);
         NODES.rcu(|nodes| nodes.remove(&node_ptr));
+
         ret
     }
 }
@@ -225,6 +405,11 @@ redhook::hook! {
                         }
                     )
                 });
+
+                let _ = SEND_CH.send(
+                    RmwEvent::create_publisher(node_state.timeline_id, graph_id, topic_name_str,
+                                               message_schema.namespace, message_schema.name).into()
+                );
             }
             publisher_address
         } else {
@@ -241,6 +426,11 @@ redhook::hook! {
     unsafe fn rmw_destroy_publisher(node_ptr: NodePtr, pub_ptr: PublisherPtr) -> c_int
         => modality_hook_rmw_destroy_publisher
     {
+
+        if let Some(pub_state) = PUBLISHERS.load().get(&pub_ptr) {
+            let _ = SEND_CH.send(RmwEvent::destroy_publisher(pub_state.node_timeline_id, pub_state.graph_id).into());
+        }
+
         let ret = redhook::real!(rmw_destroy_publisher)(node_ptr, pub_ptr);
         PUBLISHERS.rcu(|pubs| pubs.remove(&pub_ptr));
         ret
@@ -305,7 +495,7 @@ redhook::hook! {
                         // fail if the rx thread is dead, but in that case
                         // a message has already been printed, and this
                         // would just be belaboring the point, repeatedly.
-                        let _ = SEND_CH.send(msg_with_time);
+                        let _ = SEND_CH.send(msg_with_time.into());
                     }
                 }
             }).is_err();
@@ -348,6 +538,12 @@ redhook::hook! {
                         }
                     )
                 });
+
+                let _ = SEND_CH.send(
+                    RmwEvent::create_subscription(
+                        node_state.timeline_id, topic_name_str, message_schema.namespace, message_schema.name
+                    ).into()
+                );
             }
             subscription_address
         } else {
@@ -361,6 +557,10 @@ redhook::hook! {
     unsafe fn rmw_destroy_subscription(node_ptr: NodePtr, sub_ptr: SubscriptionPtr) -> c_int
         => modality_hook_rmw_destroy_subscription
     {
+        if let Some(sub_state) = SUBSCRIPTIONS.load().get(&sub_ptr) {
+            let _ = SEND_CH.send(RmwEvent::destroy_subscription(sub_state.node_timeline_id, sub_state.topic_name.clone()).into());
+        }
+
         let ret = redhook::real!(rmw_destroy_subscription)(node_ptr, sub_ptr);
         SUBSCRIPTIONS.rcu(|subs| subs.remove(&sub_ptr));
         ret
@@ -399,7 +599,7 @@ redhook::hook! {
                     // the rx thread is dead, but in that case a message
                     // has already been printed, and this would just be
                     // belaboring the point, repeatedly.
-                    let _ = SEND_CH.send(msg);
+                    let _ = SEND_CH.send(msg.into());
                 }
             }
         }

@@ -6,7 +6,9 @@ use modality_ingest_client::{
     dynamic::DynamicIngestClient, protocol::InternedAttrKey, IngestClient,
 };
 
-use crate::hooks::{CapturedMessageWithTime, MessageDirection, PublisherGraphId};
+use crate::hooks::{
+    CapturedMessageWithTime, MessageDirection, PublisherGraphId, RmwEvent, RosEvent,
+};
 
 pub struct MessageProcessor {
     client: modality_ingest_client::dynamic::DynamicIngestClient,
@@ -31,24 +33,176 @@ impl MessageProcessor {
         })
     }
 
-    pub async fn message_loop(
-        mut self,
-        mut rx: tokio::sync::mpsc::UnboundedReceiver<CapturedMessageWithTime>,
-    ) {
-        while let Some(captured_message) = rx.recv().await {
-            // TODO top level errors, logging, ?
-            let _ = self.handle_message(captured_message).await;
+    pub async fn message_loop(mut self, mut rx: tokio::sync::mpsc::UnboundedReceiver<RosEvent>) {
+        while let Some(event) = rx.recv().await {
+            match event {
+                RosEvent::Message(captured_message) => {
+                    let _ = self.handle_message(captured_message).await;
+                }
+                RosEvent::Rmw(rmw_event) => {
+                    let _ = self.handle_rmw_event(rmw_event).await;
+                }
+            }
         }
+    }
+
+    async fn handle_rmw_event(
+        &mut self,
+        event: RmwEvent,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // TODO let timestamp = ();
+
+        self.open_timeline(event.timeline_id()).await?;
+
+        let mut kvs = vec![];
+
+        if let Some(ts) = event.timestamp() {
+            kvs.push((
+                self.interned_attr_key("event.timestamp").await?,
+                AttrVal::Timestamp(*ts),
+            ));
+        }
+
+        match event {
+            RmwEvent::CreateNode {
+                node_timeline_id,
+                node_namespace,
+                node_name,
+                timestamp: _
+            } => {
+                self.send_timeline_metadata(&node_timeline_id, &node_namespace, &node_name)
+                    .await?;
+                kvs.push((
+                    self.interned_attr_key("event.name").await?,
+                    AttrVal::String("rmw.create_node".to_string()),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.node.namespace").await?,
+                    AttrVal::String(node_namespace),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.node.name").await?,
+                    AttrVal::String(node_name),
+                ));
+            }
+
+            RmwEvent::DestroyNode {
+                node_timeline_id: _,
+                timestamp: _,
+            } => {
+                kvs.push((
+                    self.interned_attr_key("event.name").await?,
+                    AttrVal::String("rmw.destroy_node".to_string()),
+                ));
+            }
+
+            RmwEvent::CreatePublisher {
+                node_timeline_id: _,
+                timestamp: _,
+                gid,
+                topic: topic_name,
+                schema_namespace,
+                schema_name,
+            } => {
+                kvs.push((
+                    self.interned_attr_key("event.name").await?,
+                    AttrVal::String("rmw.create_publisher".to_string()),
+                ));
+
+                if let Some(gid) = gid {
+                    kvs.push((
+                        self.interned_attr_key("event.ros.publisher_gid").await?,
+                        AttrVal::String(gid.to_string()),
+                    ));
+                }
+
+                kvs.push((
+                    self.interned_attr_key("event.ros.topic").await?,
+                    AttrVal::String(topic_name),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.schema.namespace").await?,
+                    AttrVal::String(schema_namespace),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.schema.name").await?,
+                    AttrVal::String(schema_name),
+                ));
+            }
+
+            RmwEvent::DestroyPublisher {
+                node_timeline_id: _,
+                timestamp: _,
+                gid,
+            } => {
+                kvs.push((
+                    self.interned_attr_key("event.name").await?,
+                    AttrVal::String("rmw.destroy_publisher".to_string()),
+                ));
+
+                if let Some(gid) = gid {
+                    kvs.push((
+                        self.interned_attr_key("event.ros.publisher_gid").await?,
+                        AttrVal::String(gid.to_string()),
+                    ));
+                }
+            }
+
+            RmwEvent::CreateSubscription {
+                node_timeline_id: _,
+                timestamp: _,
+                topic: topic_name,
+                schema_namespace,
+                schema_name,
+            } => {
+                kvs.push((
+                    self.interned_attr_key("event.name").await?,
+                    AttrVal::String("rmw.create_subscription".to_string()),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.topic").await?,
+                    AttrVal::String(topic_name),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.schema.namespace").await?,
+                    AttrVal::String(schema_namespace),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.schema.name").await?,
+                    AttrVal::String(schema_name),
+                ));
+            }
+
+            RmwEvent::DestroySubscription {
+                node_timeline_id: _,
+                timestamp: _,
+                topic: topic_name,
+            } => {
+                kvs.push((
+                    self.interned_attr_key("event.name").await?,
+                    AttrVal::String("rmw.destroy_subscription".to_string()),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.topic").await?,
+                    AttrVal::String(topic_name),
+                ));
+            }
+        }
+
+        self.client.event(self.ordering, kvs).await?;
+        self.ordering += 1;
+
+        Ok(())
     }
 
     async fn handle_message(
         &mut self,
         captured_message: CapturedMessageWithTime,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.open_timeline(
-            captured_message.msg.node_namespace,
-            captured_message.msg.node_name,
-            captured_message.msg.node_timeline_id,
+        self.open_timeline_and_send_metadata(
+            &captured_message.msg.node_timeline_id,
+            &captured_message.msg.node_namespace,
+            &captured_message.msg.node_name,
         )
         .await?;
 
@@ -185,17 +339,25 @@ impl MessageProcessor {
         Ok(())
     }
 
-    // These strings are refs into a PublisherState, which stays put
-    // on the heap after it's allocated, and never goes away.
     async fn open_timeline(
         &mut self,
-        node_namespace: String,
-        node_name: String,
-        timeline_id: TimelineId,
+        timeline_id: &TimelineId,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        self.client.open_timeline(timeline_id).await?;
+        if self.currently_open_timeline.as_ref() != Some(timeline_id) {
+            self.client.open_timeline(*timeline_id).await?;
+            self.currently_open_timeline = Some(*timeline_id);
+        }
 
-        let timeline_is_new = self.created_timelines.insert(timeline_id);
+        Ok(())
+    }
+
+    async fn send_timeline_metadata(
+        &mut self,
+        timeline_id: &TimelineId,
+        node_namespace: &str,
+        node_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let timeline_is_new = self.created_timelines.insert(*timeline_id);
         if timeline_is_new {
             let mut timeline_name = format!("{node_namespace}/{node_name}");
             while timeline_name.starts_with('/') {
@@ -209,12 +371,12 @@ impl MessageProcessor {
                 ),
                 (
                     self.interned_attr_key("timeline.ros.node.name").await?,
-                    AttrVal::String(node_name.clone()),
+                    AttrVal::String(node_name.to_string()),
                 ),
                 (
                     self.interned_attr_key("timeline.ros.node.namespace")
                         .await?,
-                    AttrVal::String(node_namespace.clone()),
+                    AttrVal::String(node_namespace.to_string()),
                 ),
                 (
                     self.interned_attr_key("timeline.ros.node").await?,
@@ -225,9 +387,18 @@ impl MessageProcessor {
             self.client.timeline_metadata(tl_attrs).await?;
         }
 
-        self.currently_open_timeline = Some(timeline_id);
-
         Ok(())
+    }
+
+    async fn open_timeline_and_send_metadata(
+        &mut self,
+        timeline_id: &TimelineId,
+        node_namespace: &str,
+        node_name: &str,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.open_timeline(timeline_id).await?;
+        self.send_timeline_metadata(timeline_id, node_namespace, node_name)
+            .await
     }
 
     async fn interned_attr_key(

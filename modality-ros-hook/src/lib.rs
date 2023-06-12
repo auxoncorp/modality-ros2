@@ -368,7 +368,6 @@ impl FlatRosMessageSchema {
                                 local_attr_kvs.iter().find(|t| t.0 == "key"),
                                 local_attr_kvs.iter().find(|t| t.0 == "value"),
                             ) {
-                                // TODO more complete key normalization
                                 let ks = normalize_string_for_attr_key(k.to_string());
                                 kvs.push((ks.clone(), v.clone()));
                                 kvs.push((format!("{ks}.key"), AttrVal::String(k.to_string())));
@@ -443,7 +442,7 @@ fn as_values_field(member: &FlatRosMessageMemberSchema) -> Option<&MessageSequen
                     },
                 ..
             },
-        ) if key == "values" && namespace == "diagnostic_msgs::msg" && name == "KeyValue" => {
+        ) if key == "values" && (namespace == "diagnostic_msgs::msg" || namespace == "diagnostic_msgs__msg") && name == "KeyValue" => {
             Some(seq)
         }
         _ => None,
@@ -454,7 +453,7 @@ fn extract_log_message(
     schema: &FlatRosMessageSchema,
     kvs: &[(String, AttrVal)],
 ) -> Option<AttrVal> {
-    if schema.namespace == "rcl_interfaces__msg" && schema.name == "Log" {
+    if (schema.namespace == "rcl_interfaces__msg" || schema.namespace == "rcl_interfaces::msg") && schema.name == "Log" {
         if let Some((_, msg)) = kvs.iter().find(|(k, _)| k == "msg") {
             return Some(msg.clone());
         }
