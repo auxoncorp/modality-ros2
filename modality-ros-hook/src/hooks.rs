@@ -481,8 +481,12 @@ redhook::hook! {
 
         let res = redhook::real!(clock_gettime)(clock_id, timespec);
 
-        // 0 means success
-        if res == 0 {
+        // return value 0 means success
+        //
+        // clock id 0 is the regular wall clock. fastdds does some
+        // other calls for a different id before this one, which is
+        // attached to the message.
+        if res == 0 && clock_id == 0 {
             let _called_after_dest = LAST_CAPTURED_MESSAGE.try_with(|b| {
                 if let Some(msgs) = b.borrow_mut().take() {
                     for msg in msgs.into_iter() {
