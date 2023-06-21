@@ -96,6 +96,7 @@ impl RosMessageSchema {
             return None;
         }
 
+        //println!("frobulate");
         if (*ts).typesupport_identifier.is_null() {
             return None;
         }
@@ -106,6 +107,7 @@ impl RosMessageSchema {
             } else if ts_id == interop::ROSIDL_TYPESUPPORT_INTROSPECTION_CPP_IDENTIFIER {
                 // they're actually the same exact memory layout
                 std::mem::transmute((*ts).data)
+                //return None;
             } else {
                 unimplemented!(
                     "unknown typesupport type: {}",
@@ -453,7 +455,10 @@ fn as_values_field(member: &FlatRosMessageMemberSchema) -> Option<&MessageSequen
                     },
                 ..
             },
-        ) if key == "values" && (namespace == "diagnostic_msgs::msg" || namespace == "diagnostic_msgs__msg") && name == "KeyValue" => {
+        ) if key == "values"
+            && (namespace == "diagnostic_msgs::msg" || namespace == "diagnostic_msgs__msg")
+            && name == "KeyValue" =>
+        {
             Some(seq)
         }
         _ => None,
@@ -464,7 +469,9 @@ fn extract_log_message(
     schema: &FlatRosMessageSchema,
     kvs: &[(String, AttrVal)],
 ) -> Option<AttrVal> {
-    if (schema.namespace == "rcl_interfaces__msg" || schema.namespace == "rcl_interfaces::msg") && schema.name == "Log" {
+    if (schema.namespace == "rcl_interfaces__msg" || schema.namespace == "rcl_interfaces::msg")
+        && schema.name == "Log"
+    {
         if let Some((_, msg)) = kvs.iter().find(|(k, _)| k == "msg") {
             return Some(msg.clone());
         }
@@ -504,15 +511,19 @@ impl ScalarMemberSchema {
         } = &self;
 
         if let Some(val_slice) = message.get(*offset..) {
-            let val = unsafe { ros_to_attr_val(type_id, val_slice.as_ptr())? };
+            if !val_slice.as_ptr().is_null() {
+                let key = if let Some(p) = prefix {
+                    format!("{p}.{key}")
+                } else {
+                    key.clone()
+                };
 
-            let key = if let Some(p) = prefix {
-                format!("{p}.{key}")
-            } else {
-                key.clone()
-            };
+                //println!("Scalar Member: {key}");
 
-            kvs.push((key, val));
+                let val = unsafe { ros_to_attr_val(type_id, val_slice.as_ptr())? };
+
+                kvs.push((key, val));
+            }
         }
 
         Some(())
@@ -565,6 +576,8 @@ impl ScalarArrayMemberSchema {
                         } else {
                             format!("{key}.{i}")
                         };
+
+                        //println!("Scalar Array Member: {item_key}");
                         let item_ptr = get_function(scalar_array_ptr, i);
                         if !item_ptr.is_null() {
                             let val = ros_to_attr_val(type_id, item_ptr as *const u8)?;
@@ -586,12 +599,16 @@ impl MessageSequenceMemberSchema {
         message: &[u8],
         kvs: &mut Vec<(String, AttrVal)>,
     ) -> Option<()> {
+        use std::io::Write;
         self.for_each_item(message, |i, item_slice| {
             let item_key = if let Some(p) = prefix {
                 format!("{p}.{}.{i}", self.key)
             } else {
                 format!("{}.{i}", self.key)
             };
+
+            //println!("message sequence member schema: {item_key}");
+            std::io::stdout().flush().unwrap();
 
             for item_field_schema in self.message_schema.members.iter() {
                 item_field_schema.interpret_message(Some(&item_key), item_slice, kvs)?;
@@ -664,9 +681,20 @@ unsafe fn ros_to_attr_val(
         }
         RosIdlTypesupportIntrospectionCFieldTypes::Boolean => AttrVal::Bool(*ptr != 0),
         RosIdlTypesupportIntrospectionCFieldTypes::Octet
-        | RosIdlTypesupportIntrospectionCFieldTypes::UInt8 => AttrVal::Integer(u8::from_ne_bytes(
-            slice::from_raw_parts(ptr, 1).try_into().ok()?,
-        ) as i64),
+        | RosIdlTypesupportIntrospectionCFieldTypes::UInt8 => {
+            let av = AttrVal::Integer(u8::from_ne_bytes(
+                slice::from_raw_parts(ptr, 1).try_into().ok()?,
+            ) as i64);
+
+            /*if ptr as usize <= 0xFF {
+                println!("u8: {}", ptr as i64);
+                println!("ptr-u8: {}", *ptr);
+                println!("as attrval: {av:?}");
+                panic!("definitely not a pointer");
+            }*/
+
+            av
+        }
         RosIdlTypesupportIntrospectionCFieldTypes::Int8 => AttrVal::Integer(i8::from_ne_bytes(
             slice::from_raw_parts(ptr, 1).try_into().ok()?,
         ) as i64),

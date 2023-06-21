@@ -379,6 +379,7 @@ redhook::hook! {
         }
 
 
+        println!("topic: {}", topic_name_str);
         let mut maybe_schema = RosMessageSchema::from_c(type_support);
 
         if let Some(node_state) = NODES.load().get(&node) {
