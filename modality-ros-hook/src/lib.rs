@@ -96,6 +96,9 @@ impl RosMessageSchema {
             return None;
         }
 
+        if (*ts).typesupport_identifier.is_null() {
+            return None;
+        }
         let ts_id = CStr::from_ptr((*ts).typesupport_identifier);
         let c_schema: *const interop::RosIdlTypesupportIntrospectionCMessageMembers =
             if ts_id == interop::ROSIDL_TYPESUPPORT_INTROSPECTION_C_IDENTIFIER {
@@ -110,10 +113,18 @@ impl RosMessageSchema {
                 )
             };
 
+        if (*c_schema).members.is_null() {
+            return None;
+        }
+
         let c_members: &[interop::RosIdlTypesupportIntrospectionCMessageMember] =
             std::slice::from_raw_parts((*c_schema).members, (*c_schema).member_count_ as usize);
         let mut members = vec![];
         for c_member in c_members {
+            if c_member.name.is_null() {
+                continue;
+            }
+
             let name =
                 String::from_utf8_lossy(CStr::from_ptr(c_member.name).to_bytes()).to_string();
             let type_id = c_member.type_id_;
@@ -555,8 +566,10 @@ impl ScalarArrayMemberSchema {
                             format!("{key}.{i}")
                         };
                         let item_ptr = get_function(scalar_array_ptr, i);
-                        let val = ros_to_attr_val(type_id, item_ptr as *const u8)?;
-                        kvs.push((item_key, val));
+                        if !item_ptr.is_null() {
+                            let val = ros_to_attr_val(type_id, item_ptr as *const u8)?;
+                            kvs.push((item_key, val));
+                        }
                     }
                 }
             }
@@ -603,8 +616,11 @@ impl MessageSequenceMemberSchema {
 
                 for i in 0..msg_array_len {
                     let item_ptr = get_function(slice.as_ptr() as _, i);
-                    let item_slice: &[u8] =
-                        slice::from_raw_parts(item_ptr as _, self.message_schema.size);
+                    let item_slice: &[u8] = if !item_ptr.is_null() {
+                        slice::from_raw_parts(item_ptr as _, self.message_schema.size)
+                    } else {
+                        &[]
+                    };
                     f(i, item_slice)?;
                 }
             }
@@ -617,6 +633,10 @@ unsafe fn ros_to_attr_val(
     type_id: &RosIdlTypesupportIntrospectionCFieldTypes,
     ptr: *const u8,
 ) -> Option<AttrVal> {
+    if ptr.is_null() {
+        return None;
+    }
+
     Some(match type_id {
         RosIdlTypesupportIntrospectionCFieldTypes::String => {
             let rt_str: *const RosIdlRuntimeCString = std::mem::transmute(ptr);

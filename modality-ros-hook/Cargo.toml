@@ -28,3 +28,7 @@ modality-ingest-client = "0.2"
 [lib]
 name = "modality_ros_hook"
 crate_type = ["dylib"]
+
+[profile.release-with-debug]
+inherits = "release"
+debug = true
