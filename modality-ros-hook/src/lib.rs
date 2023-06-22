@@ -300,7 +300,7 @@ impl FlatRosMessageSchema {
         &'a self,
         message: &'a [u8],
     ) -> impl Iterator<Item = Vec<(String, AttrVal)>> + 'a {
-        if self.namespace == "diagnostic_msgs::msg" && self.name == "DiagnosticArray" {
+        if (self.namespace == "diagnostic_msgs::msg" || self.namespace == "diagnostic_msgs__msg") && self.name == "DiagnosticArray" {
             itertools::Either::Left(self.interepret_as_diagnostic_array(message))
         } else {
             let mut kvs = vec![
@@ -435,7 +435,7 @@ fn as_status_field(member: &FlatRosMessageMemberSchema) -> Option<&MessageSequen
                 ..
             },
         ) if key == "status"
-            && namespace == "diagnostic_msgs::msg"
+            && (namespace == "diagnostic_msgs::msg" || namespace == "diagnostic_msgs__msg")
             && name == "DiagnosticStatus" =>
         {
             Some(seq)
