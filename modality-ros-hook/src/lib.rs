@@ -300,7 +300,9 @@ impl FlatRosMessageSchema {
         &'a self,
         message: &'a [u8],
     ) -> impl Iterator<Item = Vec<(String, AttrVal)>> + 'a {
-        if (self.namespace == "diagnostic_msgs::msg" || self.namespace == "diagnostic_msgs__msg") && self.name == "DiagnosticArray" {
+        if (self.namespace == "diagnostic_msgs::msg" || self.namespace == "diagnostic_msgs__msg")
+            && self.name == "DiagnosticArray"
+        {
             itertools::Either::Left(self.interepret_as_diagnostic_array(message))
         } else {
             let mut kvs = vec![
@@ -317,7 +319,14 @@ impl FlatRosMessageSchema {
             self.interpret_message_internal(None, message, &mut kvs);
 
             if let Some(msg) = extract_log_message(self, &kvs) {
-                kvs.push(("name".to_string(), msg));
+                if let Some((_, v)) = kvs
+                    .iter_mut()
+                    .find(|(k, _v)| k == "name" || k == "event.name")
+                {
+                    *v = msg;
+                } else {
+                    kvs.push(("event.name".to_string(), msg));
+                }
             }
 
             itertools::Either::Right(std::iter::once(kvs))

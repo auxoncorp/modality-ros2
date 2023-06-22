@@ -144,6 +144,7 @@ pub enum RmwEvent {
         topic: String,
         schema_namespace: String,
         schema_name: String,
+        pub_count: usize
     },
     DestroyPublisher {
         node_timeline_id: TimelineId,
@@ -201,6 +202,7 @@ impl RmwEvent {
         topic: String,
         schema_namespace: String,
         schema_name: String,
+        pub_count: usize
     ) -> RmwEvent {
         RmwEvent::CreatePublisher {
             node_timeline_id,
@@ -209,6 +211,7 @@ impl RmwEvent {
             topic,
             schema_namespace,
             schema_name,
+            pub_count
         }
     }
 
@@ -379,7 +382,7 @@ redhook::hook! {
         }
 
 
-        println!("topic: {}", topic_name_str);
+        //println!("topic: {}", topic_name_str);
         let mut maybe_schema = RosMessageSchema::from_c(type_support);
 
         if let Some(node_state) = NODES.load().get(&node) {
@@ -392,8 +395,10 @@ redhook::hook! {
                 graph_id = Some(PublisherGraphId(c_gid.data));
             }
 
+            let mut pub_count = 0;
             if let Some(message_schema) = maybe_schema.take() {
                 PUBLISHERS.rcu(|pubs| {
+                    pub_count = pubs.size() + 1;
                     pubs.insert(
                         publisher_address,
                         PublisherState {
@@ -409,7 +414,7 @@ redhook::hook! {
 
                 let _ = SEND_CH.send(
                     RmwEvent::create_publisher(node_state.timeline_id, graph_id, topic_name_str,
-                                               message_schema.namespace, message_schema.name).into()
+                                               message_schema.namespace, message_schema.name, pub_count).into()
                 );
             }
             publisher_address

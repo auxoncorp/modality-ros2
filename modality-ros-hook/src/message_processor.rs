@@ -68,7 +68,7 @@ impl MessageProcessor {
                 node_timeline_id,
                 node_namespace,
                 node_name,
-                timestamp: _
+                timestamp: _,
             } => {
                 self.send_timeline_metadata(&node_timeline_id, &node_namespace, &node_name)
                     .await?;
@@ -103,10 +103,16 @@ impl MessageProcessor {
                 topic: topic_name,
                 schema_namespace,
                 schema_name,
+                pub_count,
             } => {
                 kvs.push((
                     self.interned_attr_key("event.name").await?,
                     AttrVal::String("rmw.create_publisher".to_string()),
+                ));
+
+                kvs.push((
+                    self.interned_attr_key("event.internal.publisher.count").await?,
+                    AttrVal::Integer(pub_count as i64),
                 ));
 
                 if let Some(gid) = gid {
@@ -212,7 +218,7 @@ impl MessageProcessor {
         )];
 
         let kvs = &captured_message.msg.kvs;
-        if !kvs.iter().any(|(k, _)| k == "name") {
+        if !kvs.iter().any(|(k, _)| k == "event.name" || k == "name") {
             // If there's no incoming event name, use a normalized version of the topic name
             let mut event_name = captured_message.msg.topic_name.to_string();
             if event_name.starts_with('/') {
@@ -329,8 +335,11 @@ impl MessageProcessor {
             }
         }
 
-        for (k, v) in captured_message.msg.kvs {
-            event_attrs.push((self.interned_attr_key(&format!("event.{k}")).await?, v));
+        for (mut k, v) in captured_message.msg.kvs {
+            if !k.starts_with("event.") {
+                k = format!("event.{k}");
+            }
+            event_attrs.push((self.interned_attr_key(&k).await?, v));
         }
 
         self.client.event(self.ordering, event_attrs).await?;
