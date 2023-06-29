@@ -31,6 +31,8 @@ lazy_static! {
         let topics = rpds::HashTrieSet::default();
         // TODO make this configurable
         let topics = topics.insert("/parameter_events".to_string());
+        let topics = topics.insert("/mavros/param/event".to_string());
+        let topics = topics.insert("/mros/objective/_action/feedback".to_string());
         ArcSwap::new(std::sync::Arc::new(topics))
     };
 
