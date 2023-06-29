@@ -111,7 +111,8 @@ impl MessageProcessor {
                 ));
 
                 kvs.push((
-                    self.interned_attr_key("event.internal.publisher.count").await?,
+                    self.interned_attr_key("event.internal.publisher.count")
+                        .await?,
                     AttrVal::Integer(pub_count as i64),
                 ));
 
@@ -218,7 +219,10 @@ impl MessageProcessor {
         )];
 
         let kvs = &captured_message.msg.kvs;
-        if !kvs.iter().any(|(k, _)| k == "event.name" || k == "name") {
+        if !kvs
+            .iter()
+            .any(|(k, v)| (k == "event.name" || k == "name") && is_non_empty_string(v))
+        {
             // If there's no incoming event name, use a normalized version of the topic name
             let mut event_name = captured_message.msg.topic_name.to_string();
             if event_name.starts_with('/') {
@@ -421,6 +425,13 @@ impl MessageProcessor {
         let ik = self.client.declare_attr_key(name.to_string()).await?;
         self.attr_key_cache.insert(name.to_string(), ik);
         Ok(ik)
+    }
+}
+
+fn is_non_empty_string(v: &AttrVal) -> bool {
+    match v {
+        AttrVal::String(s) => !s.is_empty(),
+        _ => false,
     }
 }
 

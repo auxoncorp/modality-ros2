@@ -11,7 +11,6 @@ license = "Apache-2.0"
 repository = "https://github.com/auxoncorp/modality-ros2"
 
 [dependencies]
-redhook = "2.0"
 cstr = "0.2.11"
 lazy_static = "1.4"
 rpds = "0.12"
@@ -26,8 +25,11 @@ modality-api = "0.1"
 modality-ingest-client = "0.2"
 
 [lib]
-name = "modality_ros_hook"
-crate_type = ["dylib"]
+name = "modality_ros_hook_rust"
+crate_type = ["staticlib"]
+
+[profile.release]
+opt-level = "z"
 
 [profile.release-with-debug]
 inherits = "release"

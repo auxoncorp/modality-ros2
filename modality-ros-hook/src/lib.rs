@@ -92,14 +92,8 @@ impl RosMessageSchema {
     #[allow(clippy::if_same_then_else)]
     unsafe fn from_c(type_support: *const interop::RosIdlMessageTypeSupportT) -> Option<Self> {
         let ts = interop::get_typesupport(type_support);
-        if ts.is_null() {
-            return None;
-        }
 
         //println!("frobulate");
-        if (*ts).typesupport_identifier.is_null() {
-            return None;
-        }
         let ts_id = CStr::from_ptr((*ts).typesupport_identifier);
         let c_schema: *const interop::RosIdlTypesupportIntrospectionCMessageMembers =
             if ts_id == interop::ROSIDL_TYPESUPPORT_INTROSPECTION_C_IDENTIFIER {
@@ -115,18 +109,10 @@ impl RosMessageSchema {
                 )
             };
 
-        if (*c_schema).members.is_null() {
-            return None;
-        }
-
         let c_members: &[interop::RosIdlTypesupportIntrospectionCMessageMember] =
             std::slice::from_raw_parts((*c_schema).members, (*c_schema).member_count_ as usize);
         let mut members = vec![];
         for c_member in c_members {
-            if c_member.name.is_null() {
-                continue;
-            }
-
             let name =
                 String::from_utf8_lossy(CStr::from_ptr(c_member.name).to_bytes()).to_string();
             let type_id = c_member.type_id_;
@@ -398,9 +384,6 @@ impl FlatRosMessageSchema {
                             }
 
                             Some(())
-
-                            // status.values.buffer_overruns=0
-                            // status.values.buffer_overruns.key = "Buffer overruns"
                         });
                     } else {
                         item_field_schema.interpret_message(
@@ -520,19 +503,17 @@ impl ScalarMemberSchema {
         } = &self;
 
         if let Some(val_slice) = message.get(*offset..) {
-            if !val_slice.as_ptr().is_null() {
-                let key = if let Some(p) = prefix {
-                    format!("{p}.{key}")
-                } else {
-                    key.clone()
-                };
+            let key = if let Some(p) = prefix {
+                format!("{p}.{key}")
+            } else {
+                key.clone()
+            };
 
-                //println!("Scalar Member: {key}");
+            //println!("Scalar Member: {key}");
 
-                let val = unsafe { ros_to_attr_val(type_id, val_slice.as_ptr())? };
+            let val = unsafe { ros_to_attr_val(type_id, val_slice.as_ptr())? };
 
-                kvs.push((key, val));
-            }
+            kvs.push((key, val));
         }
 
         Some(())
@@ -576,23 +557,19 @@ impl ScalarArrayMemberSchema {
                     return Some(());
                 }
 
-                if !scalar_array_ptr.is_null() {
-                    let get_function = (*get_function)?;
+                let get_function = (*get_function)?;
 
-                    for i in 0..scalar_array_len {
-                        let item_key = if let Some(p) = prefix {
-                            format!("{p}.{key}.{i}")
-                        } else {
-                            format!("{key}.{i}")
-                        };
+                for i in 0..scalar_array_len {
+                    let item_key = if let Some(p) = prefix {
+                        format!("{p}.{key}.{i}")
+                    } else {
+                        format!("{key}.{i}")
+                    };
 
-                        //println!("Scalar Array Member: {item_key}");
-                        let item_ptr = get_function(scalar_array_ptr, i);
-                        if !item_ptr.is_null() {
-                            let val = ros_to_attr_val(type_id, item_ptr as *const u8)?;
-                            kvs.push((item_key, val));
-                        }
-                    }
+                    //println!("Scalar Array Member: {item_key}");
+                    let item_ptr = get_function(scalar_array_ptr, i);
+                    let val = ros_to_attr_val(type_id, item_ptr as *const u8)?;
+                    kvs.push((item_key, val));
                 }
             }
 
@@ -642,11 +619,8 @@ impl MessageSequenceMemberSchema {
 
                 for i in 0..msg_array_len {
                     let item_ptr = get_function(slice.as_ptr() as _, i);
-                    let item_slice: &[u8] = if !item_ptr.is_null() {
-                        slice::from_raw_parts(item_ptr as _, self.message_schema.size)
-                    } else {
-                        &[]
-                    };
+                    let item_slice: &[u8] =
+                        slice::from_raw_parts(item_ptr as _, self.message_schema.size);
                     f(i, item_slice)?;
                 }
             }
@@ -659,10 +633,6 @@ unsafe fn ros_to_attr_val(
     type_id: &RosIdlTypesupportIntrospectionCFieldTypes,
     ptr: *const u8,
 ) -> Option<AttrVal> {
-    if ptr.is_null() {
-        return None;
-    }
-
     Some(match type_id {
         RosIdlTypesupportIntrospectionCFieldTypes::String => {
             let rt_str: *const RosIdlRuntimeCString = std::mem::transmute(ptr);
@@ -691,9 +661,9 @@ unsafe fn ros_to_attr_val(
         RosIdlTypesupportIntrospectionCFieldTypes::Boolean => AttrVal::Bool(*ptr != 0),
         RosIdlTypesupportIntrospectionCFieldTypes::Octet
         | RosIdlTypesupportIntrospectionCFieldTypes::UInt8 => {
-            let av = AttrVal::Integer(u8::from_ne_bytes(
-                slice::from_raw_parts(ptr, 1).try_into().ok()?,
-            ) as i64);
+            AttrVal::Integer(
+                u8::from_ne_bytes(slice::from_raw_parts(ptr, 1).try_into().ok()?) as i64,
+            )
 
             /*if ptr as usize <= 0xFF {
                 println!("u8: {}", ptr as i64);
@@ -701,8 +671,6 @@ unsafe fn ros_to_attr_val(
                 println!("as attrval: {av:?}");
                 panic!("definitely not a pointer");
             }*/
-
-            av
         }
         RosIdlTypesupportIntrospectionCFieldTypes::Int8 => AttrVal::Integer(i8::from_ne_bytes(
             slice::from_raw_parts(ptr, 1).try_into().ok()?,

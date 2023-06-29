@@ -10,7 +10,7 @@ use modality_api::{AttrVal, Nanoseconds, TimelineId};
 
 use std::{
     cell::RefCell,
-    ffi::{c_char, c_int, c_long, c_void, CStr},
+    ffi::{c_char, c_long, c_void, CStr},
 };
 
 thread_local! {
@@ -144,7 +144,7 @@ pub enum RmwEvent {
         topic: String,
         schema_namespace: String,
         schema_name: String,
-        pub_count: usize
+        pub_count: usize,
     },
     DestroyPublisher {
         node_timeline_id: TimelineId,
@@ -202,7 +202,7 @@ impl RmwEvent {
         topic: String,
         schema_namespace: String,
         schema_name: String,
-        pub_count: usize
+        pub_count: usize,
     ) -> RmwEvent {
         RmwEvent::CreatePublisher {
             node_timeline_id,
@@ -211,7 +211,7 @@ impl RmwEvent {
             topic,
             schema_namespace,
             schema_name,
-            pub_count
+            pub_count,
         }
     }
 
@@ -331,145 +331,146 @@ impl CapturedTime {
     }
 }
 
-redhook::hook! {
-    unsafe fn rmw_create_node(context: *const c_void, name: *const c_char, namespace: *const c_char) -> NodePtr
-        => modality_hook_rmw_create_node
-    {
-        let node_name = String::from_utf8_lossy(CStr::from_ptr(name).to_bytes()).to_string();
-        let node_namespace = String::from_utf8_lossy(CStr::from_ptr(namespace).to_bytes()).to_string();
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_create_node(
+    name: *const c_char,
+    namespace: *const c_char,
+    node_address: NodePtr,
+) {
+    let node_name = String::from_utf8_lossy(CStr::from_ptr(name).to_bytes()).to_string();
+    let node_namespace = String::from_utf8_lossy(CStr::from_ptr(namespace).to_bytes()).to_string();
 
-        let node_address = redhook::real!(rmw_create_node)(context, name, namespace);
-        let node_timeline_id = TimelineId::allocate();
+    // let node_address = redhook::real!(rmw_create_node)(context, name, namespace);
+    let node_timeline_id = TimelineId::allocate();
 
-        NODES.rcu(|nodes| {
-            nodes.insert(node_address, NodeState {
-                name: node_name.clone(), namespace: node_namespace.clone(), timeline_id: node_timeline_id })
+    NODES.rcu(|nodes| {
+        nodes.insert(
+            node_address,
+            NodeState {
+                name: node_name.clone(),
+                namespace: node_namespace.clone(),
+                timeline_id: node_timeline_id,
+            },
+        )
+    });
+
+    let _ = SEND_CH.send(RmwEvent::create_node(node_namespace, node_name, node_timeline_id).into());
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_destroy_node(node_ptr: NodePtr) {
+    if let Some(node_state) = NODES.load().get(&node_ptr) {
+        let _ = SEND_CH.send(RmwEvent::destroy_node(node_state.timeline_id).into());
+    }
+
+    NODES.rcu(|nodes| nodes.remove(&node_ptr));
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_create_publisher(
+    node_ptr: NodePtr,
+    pub_ptr: PublisherPtr,
+    type_support: *const interop::RosIdlMessageTypeSupportT,
+    topic_name: *const c_char,
+) {
+    let nodes = NODES.load();
+    let Some(node_state) = nodes.get(&node_ptr) else { return };
+
+    let topic_name_str = String::from_utf8_lossy(CStr::from_ptr(topic_name).to_bytes())
+        .trim()
+        .to_string();
+    if IGNORED_TOPICS.load().contains(&topic_name_str) {
+        // shortcut return for ignored topics
+        return;
+    }
+
+    let mut maybe_schema = RosMessageSchema::from_c(type_support);
+
+    let mut graph_id = None;
+    let mut c_gid = RmwGid::default();
+    if rmw_get_gid_for_publisher(pub_ptr, &mut c_gid) == 0 {
+        graph_id = Some(PublisherGraphId(c_gid.data));
+    }
+
+    let mut pub_count = 0;
+    if let Some(message_schema) = maybe_schema.take() {
+        PUBLISHERS.rcu(|pubs| {
+            pub_count = pubs.size() + 1;
+            pubs.insert(
+                pub_ptr,
+                PublisherState {
+                    message_schema: message_schema.clone().flatten(&vec![]),
+                    topic_name: topic_name_str.clone(),
+                    node_namespace: node_state.namespace.clone(),
+                    node_name: node_state.name.clone(),
+                    node_timeline_id: node_state.timeline_id,
+                    graph_id,
+                },
+            )
         });
 
-        let _ = SEND_CH.send(RmwEvent::create_node(node_namespace, node_name, node_timeline_id).into());
-
-        node_address
+        let _ = SEND_CH.send(
+            RmwEvent::create_publisher(
+                node_state.timeline_id,
+                graph_id,
+                topic_name_str,
+                message_schema.namespace,
+                message_schema.name,
+                pub_count,
+            )
+            .into(),
+        );
     }
 }
 
-redhook::hook! {
-    unsafe fn rmw_destroy_node(node_ptr: NodePtr) -> c_int
-        => modality_hook_rmw_destroy_node
-    {
-
-        if let Some(node_state) = NODES.load().get(&node_ptr) {
-            let _ = SEND_CH.send(RmwEvent::destroy_node(node_state.timeline_id).into());
-        }
-
-        let ret = redhook::real!(rmw_destroy_node)(node_ptr);
-        NODES.rcu(|nodes| nodes.remove(&node_ptr));
-
-        ret
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_destroy_publisher(pub_ptr: PublisherPtr) {
+    if let Some(pub_state) = PUBLISHERS.load().get(&pub_ptr) {
+        let _ = SEND_CH.send(
+            RmwEvent::destroy_publisher(pub_state.node_timeline_id, pub_state.graph_id).into(),
+        );
     }
+
+    PUBLISHERS.rcu(|pubs| pubs.remove(&pub_ptr));
 }
 
-redhook::hook! {
-    unsafe fn rmw_create_publisher(node: NodePtr, type_support: *const interop::RosIdlMessageTypeSupportT,
-                                   topic_name: *const c_char, qos_policies: *const c_void,
-                                   publisher_options: *const c_void) -> PublisherPtr
-        => modality_hook_rmw_create_publisher
+#[no_mangle]
+unsafe extern "C" fn modality_before_rmw_publish(pub_ptr: PublisherPtr, message: *const c_void) {
+    let publishers = PUBLISHERS.load();
+    let Some(pub_state) = publishers.get(&pub_ptr)  else { return };
+
+    let message_size = pub_state.message_schema.size;
+    let src_message_bytes: &[u8] = std::slice::from_raw_parts(message as *const u8, message_size);
+
+    let mut captured_messages = vec![];
+    for kvs in pub_state
+        .message_schema
+        .interpret_message(src_message_bytes)
     {
-        let topic_name_str = String::from_utf8_lossy(CStr::from_ptr(topic_name).to_bytes()).trim().to_string();
-        if IGNORED_TOPICS.load().contains(&topic_name_str) {
-            // shortcut return for ignored topics
-            return redhook::real!(rmw_create_publisher)
-                (node, type_support, topic_name, qos_policies, publisher_options);
-        }
+        let topic_name = pub_state.topic_name.clone();
+        let node_namespace = pub_state.node_namespace.clone();
+        let node_name = pub_state.node_name.clone();
+        let node_timeline_id = pub_state.node_timeline_id;
 
-
-        //println!("topic: {}", topic_name_str);
-        let mut maybe_schema = RosMessageSchema::from_c(type_support);
-
-        if let Some(node_state) = NODES.load().get(&node) {
-            let publisher_address = redhook::real!(rmw_create_publisher)
-                (node, type_support, topic_name, qos_policies, publisher_options);
-
-            let mut graph_id = None;
-            let mut c_gid = RmwGid::default();
-            if rmw_get_gid_for_publisher(publisher_address, &mut c_gid) == 0 {
-                graph_id = Some(PublisherGraphId(c_gid.data));
-            }
-
-            let mut pub_count = 0;
-            if let Some(message_schema) = maybe_schema.take() {
-                PUBLISHERS.rcu(|pubs| {
-                    pub_count = pubs.size() + 1;
-                    pubs.insert(
-                        publisher_address,
-                        PublisherState {
-                            message_schema: message_schema.clone().flatten(&vec![]),
-                            topic_name: topic_name_str.clone(),
-                            node_namespace: node_state.namespace.clone(),
-                            node_name: node_state.name.clone(),
-                            node_timeline_id: node_state.timeline_id,
-                            graph_id
-                        }
-                    )
-                });
-
-                let _ = SEND_CH.send(
-                    RmwEvent::create_publisher(node_state.timeline_id, graph_id, topic_name_str,
-                                               message_schema.namespace, message_schema.name, pub_count).into()
-                );
-            }
-            publisher_address
-        } else {
-            // If someone tries to create a publisher against an
-            // uninitialized node, I guess? This is probably an error,
-            // and really shouldn't be happening.
-            redhook::real!(rmw_create_publisher)
-                (node, type_support, topic_name, qos_policies, publisher_options)
-        }
+        let direction = MessageDirection::Send {
+            local_publisher_graph_id: pub_state.graph_id,
+        };
+        let captured_message = CapturedMessage {
+            kvs,
+            topic_name,
+            node_namespace,
+            node_name,
+            direction,
+            node_timeline_id,
+        };
+        captured_messages.push(captured_message);
     }
-}
 
-redhook::hook! {
-    unsafe fn rmw_destroy_publisher(node_ptr: NodePtr, pub_ptr: PublisherPtr) -> c_int
-        => modality_hook_rmw_destroy_publisher
-    {
-
-        if let Some(pub_state) = PUBLISHERS.load().get(&pub_ptr) {
-            let _ = SEND_CH.send(RmwEvent::destroy_publisher(pub_state.node_timeline_id, pub_state.graph_id).into());
-        }
-
-        let ret = redhook::real!(rmw_destroy_publisher)(node_ptr, pub_ptr);
-        PUBLISHERS.rcu(|pubs| pubs.remove(&pub_ptr));
-        ret
-    }
-}
-
-redhook::hook! {
-    unsafe fn rmw_publish(publisher_address: PublisherPtr, message: *const c_void, allocation: *const c_void) -> c_int
-        => modality_hook_rmw_publish
-    {
-        if let Some(pub_state) = PUBLISHERS.load().get(&publisher_address) {
-            let message_size = pub_state.message_schema.size;
-            let src_message_bytes: &[u8] = std::slice::from_raw_parts(message as *const u8, message_size);
-
-            let mut captured_messages = vec![];
-            for kvs in pub_state.message_schema.interpret_message(src_message_bytes) {
-                let topic_name = pub_state.topic_name.clone();
-                let node_namespace = pub_state.node_namespace.clone();
-                let node_name = pub_state.node_name.clone();
-                let node_timeline_id = pub_state.node_timeline_id;
-
-                let direction = MessageDirection::Send { local_publisher_graph_id: pub_state.graph_id };
-                let captured_message = CapturedMessage { kvs, topic_name, node_namespace, node_name, direction, node_timeline_id };
-                captured_messages.push(captured_message);
-            }
-
-            let _called_after_dest = LAST_CAPTURED_MESSAGE.try_with(|lcm| {
-                *lcm.borrow_mut() = Some(captured_messages);
-            }).is_err();
-        }
-
-        redhook::real!(rmw_publish)(publisher_address, message, allocation)
-    }
+    let _called_after_dest = LAST_CAPTURED_MESSAGE
+        .try_with(|lcm| {
+            *lcm.borrow_mut() = Some(captured_messages);
+        })
+        .is_err();
 }
 
 #[repr(C)]
@@ -478,146 +479,148 @@ pub struct TimeSpec {
     tv_nsec: c_long,
 }
 
-redhook::hook! {
-    unsafe fn clock_gettime(clock_id: usize, timespec: *const TimeSpec) -> c_int
-        => modality_hook_clock_gettime
-    {
-        // Don't print anything in here! You'll break pieces of ROS
-        // that expect certain things on stdout AND stderr.
+#[no_mangle]
+unsafe extern "C" fn modality_after_clock_gettime(clock_id: usize, timespec: *const TimeSpec) {
+    // Don't print anything in here! You'll break pieces of ROS
+    // that expect certain things on stdout AND stderr.
 
-        let res = redhook::real!(clock_gettime)(clock_id, timespec);
-
-        // return value 0 means success
-        //
-        // clock id 0 is the regular wall clock. fastdds does some
-        // other calls for a different id before this one, which is
-        // attached to the message.
-        if res == 0 && clock_id == 0 {
-            let _called_after_dest = LAST_CAPTURED_MESSAGE.try_with(|b| {
-                if let Some(msgs) = b.borrow_mut().take() {
-                    for msg in msgs.into_iter() {
-                        let msg_with_time = CapturedMessageWithTime {
-                            msg,
-                            publish_time: CapturedTime::Compound { sec: (*timespec).tv_sec, nsec: (*timespec).tv_nsec },
-                            receive_time: None
-                        };
-                        // intentionally ignore errors here. This will
-                        // fail if the rx thread is dead, but in that case
-                        // a message has already been printed, and this
-                        // would just be belaboring the point, repeatedly.
-                        let _ = SEND_CH.send(msg_with_time.into());
-                    }
-                }
-            }).is_err();
-        }
-
-        res
+    // clock id 0 is the regular wall clock. fastdds does some
+    // other calls for a different id before this one, which is
+    // attached to the message.
+    if clock_id != 0 {
+        return;
     }
-}
 
-redhook::hook! {
-    unsafe fn rmw_create_subscription(node: NodePtr, type_support: *const interop::RosIdlMessageTypeSupportT,
-                                      topic_name: *const c_char, qos_policies: *const c_void,
-                                      subscription_options: *const c_void) -> SubscriptionPtr
-        => modality_hook_rmw_create_subscription
-
-    {
-        let topic_name_str = String::from_utf8_lossy(CStr::from_ptr(topic_name).to_bytes()).trim().to_string();
-        if IGNORED_TOPICS.load().contains(&topic_name_str) {
-            // shortcut return for ignored topics
-
-            return redhook::real!(rmw_create_subscription)
-                (node, type_support, topic_name, qos_policies, subscription_options);
-        }
-
-        if let Some(node_state) = NODES.load().get(&node) {
-            let subscription_address = redhook::real!(rmw_create_subscription)
-                (node, type_support, topic_name, qos_policies, subscription_options);
-
-            let mut maybe_schema = RosMessageSchema::from_c(type_support);
-            if let Some(message_schema) = maybe_schema.take() {
-                SUBSCRIPTIONS.rcu(|subs| {
-                    subs.insert(
-                        subscription_address,
-                        SubscriptionState {
-                            message_schema: message_schema.clone().flatten(&vec![]),
-                            topic_name: topic_name_str.clone(),
-                            node_namespace: node_state.namespace.clone(),
-                            node_name: node_state.name.clone(),
-                            node_timeline_id: node_state.timeline_id,
-                        }
-                    )
-                });
-
-                let _ = SEND_CH.send(
-                    RmwEvent::create_subscription(
-                        node_state.timeline_id, topic_name_str, message_schema.namespace, message_schema.name
-                    ).into()
-                );
-            }
-            subscription_address
-        } else {
-            redhook::real!(rmw_create_subscription)
-                (node, type_support, topic_name, qos_policies, subscription_options)
-        }
-    }
-}
-
-redhook::hook! {
-    unsafe fn rmw_destroy_subscription(node_ptr: NodePtr, sub_ptr: SubscriptionPtr) -> c_int
-        => modality_hook_rmw_destroy_subscription
-    {
-        if let Some(sub_state) = SUBSCRIPTIONS.load().get(&sub_ptr) {
-            let _ = SEND_CH.send(RmwEvent::destroy_subscription(sub_state.node_timeline_id, sub_state.topic_name.clone()).into());
-        }
-
-        let ret = redhook::real!(rmw_destroy_subscription)(node_ptr, sub_ptr);
-        SUBSCRIPTIONS.rcu(|subs| subs.remove(&sub_ptr));
-        ret
-    }
-}
-
-redhook::hook! {
-    unsafe fn rmw_take_with_info(subscription_address: PublisherPtr,
-                                 message: *mut c_void, taken: *mut bool, message_info: *mut RmwMessageInfo,
-                                 allocation: *mut c_void) -> c_int
-        => modality_hook_rmw_take_with_info
-    {
-
-        let res = redhook::real!(rmw_take_with_info)(subscription_address, message, taken, message_info, allocation);
-        // 0 is success
-        if res == 0 {
-            if let Some(sub_state) = SUBSCRIPTIONS.load().get(&subscription_address) {
-                let message_size = sub_state.message_schema.size;
-                let src_message_bytes: &[u8] = std::slice::from_raw_parts(message as *const u8, message_size);
-                for kvs in sub_state.message_schema.interpret_message(src_message_bytes) {
-                    let topic_name = sub_state.topic_name.clone();
-                    let node_namespace = sub_state.node_namespace.clone();
-                    let node_name = sub_state.node_name.clone();
-                    let node_timeline_id = sub_state.node_timeline_id;
-
-                    let remote_publisher_graph_id = Some(PublisherGraphId((*message_info).publisher_gid.data));
-                    let direction = MessageDirection::Receive { remote_publisher_graph_id };
-
-                    let msg = CapturedMessageWithTime {
-                        msg: CapturedMessage { kvs, topic_name, node_namespace, node_name, direction, node_timeline_id },
-                        publish_time: CapturedTime::SignedEpochNanos((*message_info).source_timestamp),
-                        receive_time: Some(CapturedTime::SignedEpochNanos((*message_info).received_timestamp)),
+    let _called_after_dest = LAST_CAPTURED_MESSAGE
+        .try_with(|b| {
+            if let Some(msgs) = b.borrow_mut().take() {
+                for msg in msgs.into_iter() {
+                    let msg_with_time = CapturedMessageWithTime {
+                        msg,
+                        publish_time: CapturedTime::Compound {
+                            sec: (*timespec).tv_sec,
+                            nsec: (*timespec).tv_nsec,
+                        },
+                        receive_time: None,
                     };
-
-                    // intentionally ignore errors here. This will fail if
-                    // the rx thread is dead, but in that case a message
-                    // has already been printed, and this would just be
-                    // belaboring the point, repeatedly.
-                    let _ = SEND_CH.send(msg.into());
+                    // intentionally ignore errors here. This will
+                    // fail if the rx thread is dead, but in that case
+                    // a message has already been printed, and this
+                    // would just be belaboring the point, repeatedly.
+                    let _ = SEND_CH.send(msg_with_time.into());
                 }
             }
-        }
-
-        res
-    }
+        })
+        .is_err();
 }
 
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_create_subscription(
+    node_ptr: NodePtr,
+    sub_ptr: SubscriptionPtr,
+    type_support: *const interop::RosIdlMessageTypeSupportT,
+    topic_name: *const c_char,
+) {
+    let nodes = NODES.load();
+    let Some(node_state) = nodes.get(&node_ptr) else { return };
+
+    let topic_name_str = String::from_utf8_lossy(CStr::from_ptr(topic_name).to_bytes())
+        .trim()
+        .to_string();
+    if IGNORED_TOPICS.load().contains(&topic_name_str) {
+        // shortcut return for ignored topics
+        return;
+    }
+
+    let Some(message_schema) = RosMessageSchema::from_c(type_support) else { return };
+
+    SUBSCRIPTIONS.rcu(|subs| {
+        subs.insert(
+            sub_ptr,
+            SubscriptionState {
+                message_schema: message_schema.clone().flatten(&vec![]),
+                topic_name: topic_name_str.clone(),
+                node_namespace: node_state.namespace.clone(),
+                node_name: node_state.name.clone(),
+                node_timeline_id: node_state.timeline_id,
+            },
+        )
+    });
+
+    let _ = SEND_CH.send(
+        RmwEvent::create_subscription(
+            node_state.timeline_id,
+            topic_name_str,
+            message_schema.namespace,
+            message_schema.name,
+        )
+        .into(),
+    );
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_destroy_subscription(sub_ptr: SubscriptionPtr) {
+    if let Some(sub_state) = SUBSCRIPTIONS.load().get(&sub_ptr) {
+        let _ = SEND_CH.send(
+            RmwEvent::destroy_subscription(
+                sub_state.node_timeline_id,
+                sub_state.topic_name.clone(),
+            )
+            .into(),
+        );
+    }
+
+    SUBSCRIPTIONS.rcu(|subs| subs.remove(&sub_ptr));
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_take_with_info(
+    sub_ptr: SubscriptionPtr,
+    message: *mut c_void,
+    message_info: *mut RmwMessageInfo,
+) {
+    let subscriptions = SUBSCRIPTIONS.load();
+    let Some(sub_state) = subscriptions.get(&sub_ptr) else { return};
+
+    let message_size = sub_state.message_schema.size;
+    let src_message_bytes: &[u8] = std::slice::from_raw_parts(message as *const u8, message_size);
+
+    for kvs in sub_state
+        .message_schema
+        .interpret_message(src_message_bytes)
+    {
+        let topic_name = sub_state.topic_name.clone();
+        let node_namespace = sub_state.node_namespace.clone();
+        let node_name = sub_state.node_name.clone();
+        let node_timeline_id = sub_state.node_timeline_id;
+
+        let remote_publisher_graph_id = Some(PublisherGraphId((*message_info).publisher_gid.data));
+        let direction = MessageDirection::Receive {
+            remote_publisher_graph_id,
+        };
+
+        let msg = CapturedMessageWithTime {
+            msg: CapturedMessage {
+                kvs,
+                topic_name,
+                node_namespace,
+                node_name,
+                direction,
+                node_timeline_id,
+            },
+            publish_time: CapturedTime::SignedEpochNanos((*message_info).source_timestamp),
+            receive_time: Some(CapturedTime::SignedEpochNanos(
+                (*message_info).received_timestamp,
+            )),
+        };
+
+        // intentionally ignore errors here. This will fail if
+        // the rx thread is dead, but in that case a message
+        // has already been printed, and this would just be
+        // belaboring the point, repeatedly.
+        let _ = SEND_CH.send(msg.into());
+    }
+}
 // TODO take sequence
 
 // RMW_PUBLIC
