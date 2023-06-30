@@ -10,8 +10,11 @@ use modality_api::{AttrVal, Nanoseconds, TimelineId};
 
 use std::{
     cell::RefCell,
+    env,
     ffi::{c_char, c_long, c_void, CStr},
 };
+
+const IGNORED_TOPICS_ENV_VAR: &str = "MODALITY_ROS_HOOK_IGNORED_TOPICS";
 
 thread_local! {
     /// When we intercept a message from rmw_publish, it goes in
@@ -28,9 +31,12 @@ lazy_static! {
     static ref SUBSCRIPTIONS: ArcSwap<rpds::HashTrieMap<SubscriptionPtr, SubscriptionState, ArcK>> = Default::default();
 
     static ref IGNORED_TOPICS: ArcSwap<rpds::HashTrieSet<String, ArcK>> = {
-        let topics = rpds::HashTrieSet::default();
-        // TODO make this configurable
-        let topics = topics.insert("/parameter_events".to_string());
+        let mut topics = rpds::HashTrieSet::default();
+        if let Ok(val) = env::var(IGNORED_TOPICS_ENV_VAR) {
+            for topic in val.split(",") {
+                topics.insert_mut(topic.to_string());
+            }
+        }
         ArcSwap::new(std::sync::Arc::new(topics))
     };
 
