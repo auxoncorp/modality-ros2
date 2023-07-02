@@ -27,6 +27,10 @@ lazy_static! {
     static ref PUBLISHERS: ArcSwap<rpds::HashTrieMap<PublisherPtr, PublisherState, ArcK>> = Default::default();
     static ref SUBSCRIPTIONS: ArcSwap<rpds::HashTrieMap<SubscriptionPtr, SubscriptionState, ArcK>> = Default::default();
 
+    // The next external nonce tracking
+    static ref PUBLISHER_NONCES: ArcSwap<rpds::HashTrieMap<PublisherPtr, u64, ArcK>> = Default::default();
+    static ref SUBSCRIPTION_NONCES: ArcSwap<rpds::HashTrieMap<SubscriptionPtr, u64, ArcK>> = Default::default();
+
     static ref IGNORED_TOPICS: ArcSwap<rpds::HashTrieSet<String, ArcK>> = {
         let topics = rpds::HashTrieSet::default();
         // TODO make this configurable
@@ -80,6 +84,7 @@ impl std::fmt::Display for PublisherGraphId {
     }
 }
 
+// rcl_publisher_t
 pub type PublisherPtr = usize;
 struct PublisherState {
     message_schema: FlatRosMessageSchema,
@@ -100,6 +105,7 @@ pub enum MessageDirection {
     },
 }
 
+// rcl_subscription_t
 type SubscriptionPtr = usize;
 struct SubscriptionState {
     message_schema: FlatRosMessageSchema,
@@ -292,6 +298,7 @@ pub struct CapturedMessage {
     pub node_name: String,
     pub node_timeline_id: TimelineId,
     pub direction: MessageDirection,
+    pub external_nonce: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -462,6 +469,7 @@ unsafe extern "C" fn modality_before_rmw_publish(pub_ptr: PublisherPtr, message:
             node_name,
             direction,
             node_timeline_id,
+            external_nonce: external_nonce_for_publisher(pub_ptr),
         };
         captured_messages.push(captured_message);
     }
@@ -607,6 +615,7 @@ unsafe extern "C" fn modality_after_rmw_take_with_info(
                 node_name,
                 direction,
                 node_timeline_id,
+                external_nonce: external_nonce_for_subscription(sub_ptr),
             },
             publish_time: CapturedTime::SignedEpochNanos((*message_info).source_timestamp),
             receive_time: Some(CapturedTime::SignedEpochNanos(
@@ -633,3 +642,69 @@ unsafe extern "C" fn modality_after_rmw_take_with_info(
 //   rmw_message_info_sequence_t * message_info_sequence,
 //   size_t * taken,
 //   rmw_subscription_allocation_t * allocation);
+
+#[no_mangle]
+unsafe extern "C" fn modality_ros2_impl_set_next_publisher_nonce(
+    pub_ptr: PublisherPtr,
+    nonce: u64,
+) {
+    PUBLISHER_NONCES.rcu(|pub_nonces| pub_nonces.insert(pub_ptr, nonce));
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_ros2_impl_clear_next_publisher_nonce(pub_ptr: PublisherPtr) {
+    PUBLISHER_NONCES.rcu(|pub_nonces| pub_nonces.remove(&pub_ptr));
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_ros2_impl_set_next_subscription_nonce(
+    sub_ptr: SubscriptionPtr,
+    nonce: u64,
+) {
+    SUBSCRIPTION_NONCES.rcu(|sub_nonces| sub_nonces.insert(sub_ptr, nonce));
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_ros2_impl_get_next_subscription_nonce(
+    sub_ptr: SubscriptionPtr,
+    nonce: *mut u64,
+) {
+    // A NULL subscription is tolerated fine (still bad) but we need a valid memory location for the
+    // nonce
+    if nonce.is_null() {
+        return;
+    }
+
+    let tracked_sub_nonces = SUBSCRIPTION_NONCES.load();
+    if let Some(prev_recorded_nonce) = tracked_sub_nonces.get(&sub_ptr) {
+        // This subscription is tracking external nonces
+
+        // Return the value we just recorded on the subscription's timeline
+        nonce.write(*prev_recorded_nonce);
+
+        // Post-increment in here rather than on rmw_take since this is an opt-in
+        // feature, take path just needs to load
+        SUBSCRIPTION_NONCES.rcu(|sub_nonces| sub_nonces.insert(sub_ptr, *prev_recorded_nonce + 1));
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_ros2_impl_clear_next_subscription_nonce(sub_ptr: SubscriptionPtr) {
+    SUBSCRIPTION_NONCES.rcu(|sub_nonces| sub_nonces.remove(&sub_ptr));
+}
+
+/// If the publisher is tracking external nonces, return the
+/// external nonce to be recorded on the current topic instance
+/// revc event
+fn external_nonce_for_publisher(pub_ptr: PublisherPtr) -> Option<u64> {
+    let tracked_pub_nonces = PUBLISHER_NONCES.load();
+    tracked_pub_nonces.get(&pub_ptr).cloned()
+}
+
+/// If the subscription is tracking external nonces, return the
+/// external nonce to be recorded on the current topic instance
+/// revc event
+fn external_nonce_for_subscription(sub_ptr: SubscriptionPtr) -> Option<u64> {
+    let tracked_sub_nonces = SUBSCRIPTION_NONCES.load();
+    tracked_sub_nonces.get(&sub_ptr).cloned()
+}

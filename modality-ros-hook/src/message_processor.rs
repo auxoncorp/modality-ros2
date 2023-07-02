@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use fxhash::{FxHashMap, FxHashSet};
-use modality_api::{AttrVal, Nanoseconds, TimelineId};
+use modality_api::{AttrVal, BigInt, Nanoseconds, TimelineId};
 use modality_ingest_client::{
     dynamic::DynamicIngestClient, protocol::InternedAttrKey, IngestClient,
 };
@@ -344,6 +344,14 @@ impl MessageProcessor {
                 k = format!("event.{k}");
             }
             event_attrs.push((self.interned_attr_key(&k).await?, v));
+        }
+
+        if let Some(nonce) = captured_message.msg.external_nonce {
+            event_attrs.push((
+                self.interned_attr_key("event.ros.external_interaction.nonce")
+                    .await?,
+                BigInt::new_attr_val(nonce.into()),
+            ));
         }
 
         self.client.event(self.ordering, event_attrs).await?;

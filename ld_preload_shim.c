@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <time.h>
 
+#include "modality_ros2.h" /* Only used to catch general syntax errors */
+
 /***************************************************************************/
 /* Hook functions that are called after the underlying rmw invocation.The  */
 /* passthrough invocations happen in C so we don't have Rust frames on the */
@@ -35,6 +37,14 @@ void modality_after_rmw_destroy_subscription(void *sub_ptr);
 
 void modality_after_rmw_take_with_info(void *sub_ptr, void *message,
                                        void *message_info);
+
+/* These are part of the modality-ros2 C API, we delegate to our implementation
+ * and never call the user's implementation */
+void modality_ros2_impl_set_next_publisher_nonce(void *rmw_publisher, uint64_t nonce);
+void modality_ros2_impl_clear_next_publisher_nonce(void *rmw_publisher);
+void modality_ros2_impl_set_next_subscription_nonce(void *rmw_subscription, uint64_t nonce);
+void modality_ros2_impl_get_next_subscription_nonce(void *rmw_subscription, uint64_t *nonce);
+void modality_ros2_impl_clear_next_subscription_nonce(void *rmw_subscription);
 
 /***************************************/
 /* Prototypes for the hooked functions */
@@ -68,15 +78,15 @@ typedef int (*rmw_take_with_info_t)(void *sub_ptr, void *message, void *taken,
 /* initialized on demand.                                   */
 /************************************************************/
 
-rmw_create_node_t real_rmw_create_node;
-rmw_destroy_node_t real_rmw_destroy_node;
-rmw_create_publisher_t real_rmw_create_publisher;
-rmw_destroy_publisher_t real_rmw_destroy_publisher;
-rmw_publish_t real_rmw_publish;
-clock_gettime_t real_clock_gettime;
-rmw_create_subscription_t real_rmw_create_subscription;
-rmw_destroy_subscription_t real_rmw_destroy_subscription;
-rmw_take_with_info_t real_rmw_take_with_info;
+static rmw_create_node_t real_rmw_create_node;
+static rmw_destroy_node_t real_rmw_destroy_node;
+static rmw_create_publisher_t real_rmw_create_publisher;
+static rmw_destroy_publisher_t real_rmw_destroy_publisher;
+static rmw_publish_t real_rmw_publish;
+static clock_gettime_t real_clock_gettime;
+static rmw_create_subscription_t real_rmw_create_subscription;
+static rmw_destroy_subscription_t real_rmw_destroy_subscription;
+static rmw_take_with_info_t real_rmw_take_with_info;
 
 /***********************/
 /* Hook function impls */
@@ -196,3 +206,24 @@ int rmw_take_with_info(void *sub_ptr, void *message, void *taken,
 
   return ret;
 }
+
+void modality_ros2_set_next_publisher_nonce(void *rmw_publisher, uint64_t nonce) {
+    modality_ros2_impl_set_next_publisher_nonce(rmw_publisher, nonce);
+}
+
+void modality_ros2_clear_next_publisher_nonce(void *rmw_publisher) {
+    modality_ros2_impl_clear_next_publisher_nonce(rmw_publisher);
+}
+
+void modality_ros2_set_next_subscription_nonce(void *rmw_subscription, uint64_t nonce) {
+    modality_ros2_impl_set_next_subscription_nonce(rmw_subscription, nonce);
+}
+
+void modality_ros2_get_next_subscription_nonce(void *rmw_subscription, uint64_t *nonce) {
+    modality_ros2_impl_get_next_subscription_nonce(rmw_subscription, nonce);
+}
+
+void modality_ros2_clear_next_subscription_nonce(void *rmw_subscription) {
+    modality_ros2_impl_clear_next_subscription_nonce(rmw_subscription);
+}
+
