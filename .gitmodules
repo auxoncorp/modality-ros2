@@ -1,0 +1,9 @@
+[submodule "rmw"]
+	path = rmw
+	url = git@github.com:ros2/rmw.git
+[submodule "rcutils"]
+	path = rcutils
+	url = git@github.com:ros2/rcutils.git
+[submodule "rosidl"]
+	path = rosidl
+	url = git@github.com:ros2/rosidl.git

@@ -1,8 +1,4 @@
-use crate::{
-    interop::{self, rmw_get_gid_for_publisher, RmwGid, RmwMessageInfo},
-    message_processor::MessageProcessor,
-    FlatRosMessageSchema, RosMessageSchema,
-};
+use crate::{message_processor::MessageProcessor, ros, FlatRosMessageSchema, RosMessageSchema};
 use arc_swap::ArcSwap;
 use archery::ArcK;
 use lazy_static::lazy_static;
@@ -19,7 +15,7 @@ thread_local! {
     /// thread (called by the DDS layer for the transport-level
     /// timestamp), we capture the time, add it to the message, and put
     /// it on SEND_CH for processing.
-    pub static LAST_CAPTURED_MESSAGE: RefCell<Option<Vec<CapturedMessage>>> = RefCell::new(None);
+    pub static LAST_CAPTURED_MESSAGE: RefCell<Option<Vec<CapturedMessage>>> = const { RefCell::new(None) }
 }
 
 lazy_static! {
@@ -67,7 +63,8 @@ struct NodeState {
 
 /// The unique identifier (gid) of a publisher.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct PublisherGraphId([u8; 16]);
+// TODO this size seems to have changed in humble? check that.
+pub struct PublisherGraphId([u8; 24]);
 
 impl std::fmt::Display for PublisherGraphId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -340,7 +337,9 @@ unsafe extern "C" fn modality_after_rmw_create_node(
     let node_name = String::from_utf8_lossy(CStr::from_ptr(name).to_bytes()).to_string();
     let node_namespace = String::from_utf8_lossy(CStr::from_ptr(namespace).to_bytes()).to_string();
 
-    // let node_address = redhook::real!(rmw_create_node)(context, name, namespace);
+    println!("**************************************************");
+    println!("rmw_create_node, {node_namespace} {node_name}");
+
     let node_timeline_id = TimelineId::allocate();
 
     NODES.rcu(|nodes| {
@@ -369,12 +368,14 @@ unsafe extern "C" fn modality_after_rmw_destroy_node(node_ptr: NodePtr) {
 #[no_mangle]
 unsafe extern "C" fn modality_after_rmw_create_publisher(
     node_ptr: NodePtr,
-    pub_ptr: PublisherPtr,
-    type_support: *const interop::RosIdlMessageTypeSupportT,
+    pub_ptr: *const ros::rmw::publisher,
+    type_support: *const ros::rosidl::message_type_support,
     topic_name: *const c_char,
 ) {
     let nodes = NODES.load();
-    let Some(node_state) = nodes.get(&node_ptr) else { return };
+    let Some(node_state) = nodes.get(&node_ptr) else {
+        return;
+    };
 
     let topic_name_str = String::from_utf8_lossy(CStr::from_ptr(topic_name).to_bytes())
         .trim()
@@ -387,8 +388,8 @@ unsafe extern "C" fn modality_after_rmw_create_publisher(
     let mut maybe_schema = RosMessageSchema::from_c(type_support);
 
     let mut graph_id = None;
-    let mut c_gid = RmwGid::default();
-    if rmw_get_gid_for_publisher(pub_ptr, &mut c_gid) == 0 {
+    let mut c_gid: ros::rmw::gid = std::mem::zeroed(); // good as anything?
+    if ros::rmw::get_gid_for_publisher(pub_ptr, &mut c_gid) == 0 {
         graph_id = Some(PublisherGraphId(c_gid.data));
     }
 
@@ -397,7 +398,7 @@ unsafe extern "C" fn modality_after_rmw_create_publisher(
         PUBLISHERS.rcu(|pubs| {
             pub_count = pubs.size() + 1;
             pubs.insert(
-                pub_ptr,
+                pub_ptr as usize,
                 PublisherState {
                     message_schema: message_schema.clone().flatten(&vec![]),
                     topic_name: topic_name_str.clone(),
@@ -437,7 +438,9 @@ unsafe extern "C" fn modality_after_rmw_destroy_publisher(pub_ptr: PublisherPtr)
 #[no_mangle]
 unsafe extern "C" fn modality_before_rmw_publish(pub_ptr: PublisherPtr, message: *const c_void) {
     let publishers = PUBLISHERS.load();
-    let Some(pub_state) = publishers.get(&pub_ptr)  else { return };
+    let Some(pub_state) = publishers.get(&pub_ptr) else {
+        return;
+    };
 
     let message_size = pub_state.message_schema.size;
     let src_message_bytes: &[u8] = std::slice::from_raw_parts(message as *const u8, message_size);
@@ -518,11 +521,13 @@ unsafe extern "C" fn modality_after_clock_gettime(clock_id: usize, timespec: *co
 unsafe extern "C" fn modality_after_rmw_create_subscription(
     node_ptr: NodePtr,
     sub_ptr: SubscriptionPtr,
-    type_support: *const interop::RosIdlMessageTypeSupportT,
+    type_support: *const ros::rosidl::message_type_support,
     topic_name: *const c_char,
 ) {
     let nodes = NODES.load();
-    let Some(node_state) = nodes.get(&node_ptr) else { return };
+    let Some(node_state) = nodes.get(&node_ptr) else {
+        return;
+    };
 
     let topic_name_str = String::from_utf8_lossy(CStr::from_ptr(topic_name).to_bytes())
         .trim()
@@ -532,7 +537,9 @@ unsafe extern "C" fn modality_after_rmw_create_subscription(
         return;
     }
 
-    let Some(message_schema) = RosMessageSchema::from_c(type_support) else { return };
+    let Some(message_schema) = RosMessageSchema::from_c(type_support) else {
+        return;
+    };
 
     SUBSCRIPTIONS.rcu(|subs| {
         subs.insert(
@@ -577,10 +584,12 @@ unsafe extern "C" fn modality_after_rmw_destroy_subscription(sub_ptr: Subscripti
 unsafe extern "C" fn modality_after_rmw_take_with_info(
     sub_ptr: SubscriptionPtr,
     message: *mut c_void,
-    message_info: *mut RmwMessageInfo,
+    message_info: *mut ros::rmw::message_info,
 ) {
     let subscriptions = SUBSCRIPTIONS.load();
-    let Some(sub_state) = subscriptions.get(&sub_ptr) else { return};
+    let Some(sub_state) = subscriptions.get(&sub_ptr) else {
+        return;
+    };
 
     let message_size = sub_state.message_schema.size;
     let src_message_bytes: &[u8] = std::slice::from_raw_parts(message as *const u8, message_size);

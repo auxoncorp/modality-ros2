@@ -1,16 +1,11 @@
 use core::slice;
-use std::ffi::{c_char, c_void, CStr};
-
-use interop::{
-    RosIdlRuntimeCString, RosIdlRuntimeWString, RosIdlTypesupportIntrospectionCFieldTypes,
-    RosSequence,
-};
 use itertools::Itertools;
 use modality_api::{AttrVal, BigInt};
+use std::ffi::{c_char, c_void, CStr};
 
 mod hooks;
-mod interop;
 mod message_processor;
+mod ros;
 
 #[derive(Debug, Clone)]
 #[allow(unused)]
@@ -25,7 +20,7 @@ pub struct RosMessageSchema {
 pub enum RosMessageMemberSchema {
     Scalar {
         name: String,
-        type_id: RosIdlTypesupportIntrospectionCFieldTypes,
+        type_id: ros::rosidl::typesupport_introspection::field_type,
         offset: usize,
     },
     Array {
@@ -33,8 +28,8 @@ pub enum RosMessageMemberSchema {
         item_schema: Box<RosMessageMemberSchema>,
         array_size: usize,
         is_upper_bound: bool,
-        size_function: Option<fn(*const c_void) -> usize>,
-        get_function: Option<fn(*const c_void, usize) -> *const c_void>,
+        size_function: Option<unsafe extern "C" fn(*const c_void) -> usize>,
+        get_function: Option<unsafe extern "C" fn(*const c_void, usize) -> *const c_void>,
     },
     NestedMessage {
         name: String,
@@ -62,19 +57,19 @@ pub enum FlatRosMessageMemberSchema {
 #[derive(Debug, Clone)]
 pub struct ScalarMemberSchema {
     pub key: String,
-    pub type_id: RosIdlTypesupportIntrospectionCFieldTypes,
+    pub type_id: ros::rosidl::typesupport_introspection::field_type,
     pub offset: usize,
 }
 
 #[derive(Debug, Clone)]
 pub struct ScalarArrayMemberSchema {
     pub key: String,
-    pub type_id: RosIdlTypesupportIntrospectionCFieldTypes,
+    pub type_id: ros::rosidl::typesupport_introspection::field_type,
     pub offset: usize,
     pub array_size: usize,
     pub is_upper_bound: bool,
-    pub size_function: Option<fn(*const c_void) -> usize>,
-    pub get_function: Option<fn(*const c_void, usize) -> *const c_void>,
+    pub size_function: Option<unsafe extern "C" fn(*const c_void) -> usize>,
+    pub get_function: Option<unsafe extern "C" fn(*const c_void, usize) -> *const c_void>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,42 +79,42 @@ pub struct MessageSequenceMemberSchema {
     pub message_schema: FlatRosMessageSchema,
     pub array_size: usize,
     pub is_upper_bound: bool,
-    pub size_function: Option<fn(*const c_void) -> usize>,
-    pub get_function: Option<fn(*const c_void, usize) -> *const c_void>,
+    pub size_function: Option<unsafe extern "C" fn(*const c_void) -> usize>,
+    pub get_function: Option<unsafe extern "C" fn(*const c_void, usize) -> *const c_void>,
 }
 
 impl RosMessageSchema {
     #[allow(clippy::if_same_then_else)]
-    unsafe fn from_c(type_support: *const interop::RosIdlMessageTypeSupportT) -> Option<Self> {
-        let ts = interop::get_typesupport(type_support);
+    unsafe fn from_c(type_support: *const ros::rosidl::message_type_support) -> Option<Self> {
+        let ts = ros::rmw::get_typesupport(type_support);
 
-        //println!("frobulate");
         let ts_id = CStr::from_ptr((*ts).typesupport_identifier);
-        let c_schema: *const interop::RosIdlTypesupportIntrospectionCMessageMembers =
-            if ts_id == interop::ROSIDL_TYPESUPPORT_INTROSPECTION_C_IDENTIFIER {
+        let c_schema: *const ros::rosidl::typesupport_introspection::MessageMembers =
+            if ts_id == ros::rosidl::typesupport_introspection::C_IDENTIFIER {
                 std::mem::transmute((*ts).data)
-            } else if ts_id == interop::ROSIDL_TYPESUPPORT_INTROSPECTION_CPP_IDENTIFIER {
+            } else if ts_id == ros::rosidl::typesupport_introspection::CPP_IDENTIFIER {
                 // they're actually the same exact memory layout
                 std::mem::transmute((*ts).data)
-                //return None;
             } else {
                 unimplemented!(
                     "unknown typesupport type: {}",
-                    interop::debug_c_str((*ts).typesupport_identifier)
+                    ros::debug_c_str((*ts).typesupport_identifier)
                 )
             };
 
-        let c_members: &[interop::RosIdlTypesupportIntrospectionCMessageMember] =
-            std::slice::from_raw_parts((*c_schema).members, (*c_schema).member_count_ as usize);
+        let c_members: &[ros::rosidl::typesupport_introspection::MessageMember] =
+            std::slice::from_raw_parts((*c_schema).members_, (*c_schema).member_count_ as usize);
         let mut members = vec![];
         for c_member in c_members {
             let name =
-                String::from_utf8_lossy(CStr::from_ptr(c_member.name).to_bytes()).to_string();
-            let type_id = c_member.type_id_;
+                String::from_utf8_lossy(CStr::from_ptr(c_member.name_).to_bytes()).to_string();
+            let type_id = c_member.type_id_ as u32;
             let offset = c_member.offset_ as usize;
 
             let member = if c_member.is_array_ {
-                let item_schema = if type_id == RosIdlTypesupportIntrospectionCFieldTypes::Message {
+                let item_schema = if type_id
+                    == ros::rosidl::typesupport_introspection::field_types::ROS_TYPE_MESSAGE
+                {
                     Box::new(RosMessageMemberSchema::NestedMessage {
                         name,
                         offset,
@@ -140,7 +135,9 @@ impl RosMessageSchema {
                     size_function: c_member.size_function,
                     get_function: c_member.get_const_function,
                 }
-            } else if type_id == RosIdlTypesupportIntrospectionCFieldTypes::Message {
+            } else if type_id
+                == ros::rosidl::typesupport_introspection::field_types::ROS_TYPE_MESSAGE
+            {
                 RosMessageMemberSchema::NestedMessage {
                     name,
                     offset,
@@ -509,9 +506,7 @@ impl ScalarMemberSchema {
                 key.clone()
             };
 
-            //println!("Scalar Member: {key}");
-
-            let val = unsafe { ros_to_attr_val(type_id, val_slice.as_ptr())? };
+            let val = unsafe { ros_to_attr_val(*type_id, val_slice.as_ptr())? };
 
             kvs.push((key, val));
         }
@@ -541,7 +536,8 @@ impl ScalarArrayMemberSchema {
             if let Some(slice) = message.get(*offset..) {
                 let scalar_array_ptr = (slice).as_ptr() as *const c_void;
 
-                let seq: *const RosSequence = std::mem::transmute(slice.as_ptr());
+                let seq: *const ros::rosidl::runtime::ByteSequence =
+                    std::mem::transmute(slice.as_ptr());
 
                 // This *SHOULD* work. I don't know why it doesn't.
                 // let scalar_array_len = ((*size_function)?)(scalar_array_ptr);
@@ -566,9 +562,8 @@ impl ScalarArrayMemberSchema {
                         format!("{key}.{i}")
                     };
 
-                    //println!("Scalar Array Member: {item_key}");
                     let item_ptr = get_function(scalar_array_ptr, i);
-                    let val = ros_to_attr_val(type_id, item_ptr as *const u8)?;
+                    let val = ros_to_attr_val(*type_id, item_ptr as *const u8)?;
                     kvs.push((item_key, val));
                 }
             }
@@ -613,7 +608,8 @@ impl MessageSequenceMemberSchema {
     ) -> Option<()> {
         unsafe {
             if let Some(slice) = message.get(self.offset..) {
-                let seq: *const RosSequence = std::mem::transmute(slice.as_ptr());
+                let seq: *const ros::rosidl::runtime::ByteSequence =
+                    std::mem::transmute(slice.as_ptr());
                 let msg_array_len = ((self.size_function)?)(seq as _);
                 let get_function = self.get_function?;
 
@@ -630,37 +626,37 @@ impl MessageSequenceMemberSchema {
 }
 
 unsafe fn ros_to_attr_val(
-    type_id: &RosIdlTypesupportIntrospectionCFieldTypes,
+    type_id: ros::rosidl::typesupport_introspection::field_type,
     ptr: *const u8,
 ) -> Option<AttrVal> {
+    use ros::rosidl::typesupport_introspection::field_types::*;
     Some(match type_id {
-        RosIdlTypesupportIntrospectionCFieldTypes::String => {
-            let rt_str: *const RosIdlRuntimeCString = std::mem::transmute(ptr);
+        ROS_TYPE_STRING => {
+            let rt_str: *const ros::rosidl::runtime::String = std::mem::transmute(ptr);
             AttrVal::String((*rt_str).as_string())
         }
-        RosIdlTypesupportIntrospectionCFieldTypes::WString => {
-            let rt_str: *const RosIdlRuntimeWString = std::mem::transmute(ptr);
+        ROS_TYPE_WSTRING => {
+            let rt_str: *const ros::rosidl::runtime::U16String = std::mem::transmute(ptr);
             AttrVal::String((*rt_str).as_string()?)
         }
-        RosIdlTypesupportIntrospectionCFieldTypes::Float => AttrVal::Float(
+        ROS_TYPE_FLOAT => AttrVal::Float(
             (f32::from_ne_bytes(slice::from_raw_parts(ptr, 4).try_into().ok()?) as f64).into(),
         ),
-        RosIdlTypesupportIntrospectionCFieldTypes::Double => AttrVal::Float(
+        ROS_TYPE_DOUBLE => AttrVal::Float(
             f64::from_ne_bytes(slice::from_raw_parts(ptr, 8).try_into().ok()?).into(),
         ),
-        RosIdlTypesupportIntrospectionCFieldTypes::LongDouble => {
+        ROS_TYPE_LONG_DOUBLE => {
             return None;
         }
-        RosIdlTypesupportIntrospectionCFieldTypes::Char => AttrVal::String(
+        ROS_TYPE_CHAR => AttrVal::String(
             c_char::from_ne_bytes(slice::from_raw_parts(ptr, 1).try_into().ok()?).to_string(),
         ),
-        RosIdlTypesupportIntrospectionCFieldTypes::WChar => {
+        ROS_TYPE_WCHAR => {
             let wchar = u16::from_ne_bytes(slice::from_raw_parts(ptr, 2).try_into().ok()?);
             AttrVal::String(String::from_utf16_lossy(&[wchar]))
         }
-        RosIdlTypesupportIntrospectionCFieldTypes::Boolean => AttrVal::Bool(*ptr != 0),
-        RosIdlTypesupportIntrospectionCFieldTypes::Octet
-        | RosIdlTypesupportIntrospectionCFieldTypes::UInt8 => {
+        ROS_TYPE_BOOLEAN => AttrVal::Bool(*ptr != 0),
+        ROS_TYPE_OCTET | ROS_TYPE_UINT8 => {
             AttrVal::Integer(
                 u8::from_ne_bytes(slice::from_raw_parts(ptr, 1).try_into().ok()?) as i64,
             )
@@ -672,29 +668,34 @@ unsafe fn ros_to_attr_val(
                 panic!("definitely not a pointer");
             }*/
         }
-        RosIdlTypesupportIntrospectionCFieldTypes::Int8 => AttrVal::Integer(i8::from_ne_bytes(
-            slice::from_raw_parts(ptr, 1).try_into().ok()?,
-        ) as i64),
-        RosIdlTypesupportIntrospectionCFieldTypes::UInt16 => AttrVal::Integer(u16::from_ne_bytes(
-            slice::from_raw_parts(ptr, 2).try_into().ok()?,
-        ) as i64),
-        RosIdlTypesupportIntrospectionCFieldTypes::Int16 => AttrVal::Integer(i16::from_ne_bytes(
-            slice::from_raw_parts(ptr, 2).try_into().ok()?,
-        ) as i64),
-        RosIdlTypesupportIntrospectionCFieldTypes::UInt32 => AttrVal::Integer(u32::from_ne_bytes(
-            slice::from_raw_parts(ptr, 4).try_into().ok()?,
-        ) as i64),
-        RosIdlTypesupportIntrospectionCFieldTypes::Int32 => AttrVal::Integer(i32::from_ne_bytes(
-            slice::from_raw_parts(ptr, 4).try_into().ok()?,
-        ) as i64),
-        RosIdlTypesupportIntrospectionCFieldTypes::UInt64 => BigInt::new_attr_val(
-            u64::from_ne_bytes(slice::from_raw_parts(ptr, 8).try_into().ok()?) as i128,
+        /*ROS_INT8*/
+        9 => AttrVal::Integer(
+            i8::from_ne_bytes(slice::from_raw_parts(ptr, 1).try_into().ok()?) as i64,
         ),
-        RosIdlTypesupportIntrospectionCFieldTypes::Int64 => AttrVal::Integer(i64::from_ne_bytes(
+        ROS_TYPE_UINT16 => AttrVal::Integer(u16::from_ne_bytes(
+            slice::from_raw_parts(ptr, 2).try_into().ok()?,
+        ) as i64),
+        ROS_TYPE_INT16 => AttrVal::Integer(i16::from_ne_bytes(
+            slice::from_raw_parts(ptr, 2).try_into().ok()?,
+        ) as i64),
+        ROS_TYPE_UINT32 => AttrVal::Integer(u32::from_ne_bytes(
+            slice::from_raw_parts(ptr, 4).try_into().ok()?,
+        ) as i64),
+        ROS_TYPE_INT32 => AttrVal::Integer(i32::from_ne_bytes(
+            slice::from_raw_parts(ptr, 4).try_into().ok()?,
+        ) as i64),
+        ROS_TYPE_UINT64 => BigInt::new_attr_val(u64::from_ne_bytes(
+            slice::from_raw_parts(ptr, 8).try_into().ok()?,
+        ) as i128),
+        ROS_TYPE_INT64 => AttrVal::Integer(i64::from_ne_bytes(
             slice::from_raw_parts(ptr, 8).try_into().ok()?,
         )),
-        RosIdlTypesupportIntrospectionCFieldTypes::Message => {
+        ROS_TYPE_MESSAGE => {
             // if we get here, we've taken a wrong turn
+            return None;
+        }
+        _ => {
+            // Invalid value
             return None;
         }
     })

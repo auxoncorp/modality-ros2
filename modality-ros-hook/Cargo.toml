@@ -24,6 +24,9 @@ itertools = "0.10"
 modality-api = "0.1"
 modality-ingest-client = "0.2"
 
+[build-dependencies]
+bindgen = "0.69"
+
 [lib]
 name = "modality_ros_hook_rust"
 crate_type = ["staticlib"]
