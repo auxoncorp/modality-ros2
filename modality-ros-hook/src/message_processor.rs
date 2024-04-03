@@ -1,17 +1,20 @@
-use std::time::Duration;
-
+use crate::{
+    config::CONFIG,
+    hooks::{
+        CapturedMessageWithTime, MessageDirection, PublisherGraphId, RmwEvent, RosEvent,
+        ServiceEventType,
+    },
+};
+use auxon_sdk::{
+    api::{AttrVal, Nanoseconds, TimelineId},
+    ingest_client::{dynamic::DynamicIngestClient, IngestClient},
+    ingest_protocol::InternedAttrKey,
+};
 use fxhash::{FxHashMap, FxHashSet};
-use modality_api::{AttrVal, Nanoseconds, TimelineId};
-use modality_ingest_client::{
-    dynamic::DynamicIngestClient, protocol::InternedAttrKey, IngestClient,
-};
-
-use crate::hooks::{
-    CapturedMessageWithTime, MessageDirection, PublisherGraphId, RmwEvent, RosEvent,
-};
+use std::borrow::Cow;
 
 pub struct MessageProcessor {
-    client: modality_ingest_client::dynamic::DynamicIngestClient,
+    client: DynamicIngestClient,
     attr_key_cache: FxHashMap<String, InternedAttrKey>,
     created_timelines: FxHashSet<TimelineId>,
     sent_timeline_publisher_metadata: FxHashSet<(TimelineId, PublisherGraphId)>,
@@ -22,7 +25,7 @@ pub struct MessageProcessor {
 impl MessageProcessor {
     pub async fn new() -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let client =
-            IngestClient::connect_with_standard_config(Duration::from_secs(20), None, None).await?;
+            IngestClient::connect_with_standard_config(CONFIG.connect_timeout, None, None).await?;
         Ok(MessageProcessor {
             client: DynamicIngestClient::from(client),
             attr_key_cache: Default::default(),
@@ -42,6 +45,9 @@ impl MessageProcessor {
                 RosEvent::Rmw(rmw_event) => {
                     let _ = self.handle_rmw_event(rmw_event).await;
                 }
+                RosEvent::ServiceEvent(service_event) => {
+                    let _ = self.handle_service_event(service_event).await;
+                }
             }
         }
     }
@@ -50,8 +56,6 @@ impl MessageProcessor {
         &mut self,
         event: RmwEvent,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // TODO let timestamp = ();
-
         self.open_timeline(event.timeline_id()).await?;
 
         let mut kvs = vec![];
@@ -74,15 +78,15 @@ impl MessageProcessor {
                     .await?;
                 kvs.push((
                     self.interned_attr_key("event.name").await?,
-                    AttrVal::String("rmw.create_node".to_string()),
+                    AttrVal::String(Cow::Borrowed("rmw.create_node")),
                 ));
                 kvs.push((
                     self.interned_attr_key("event.ros.node.namespace").await?,
-                    AttrVal::String(node_namespace),
+                    AttrVal::String(Cow::Owned(node_namespace)),
                 ));
                 kvs.push((
                     self.interned_attr_key("event.ros.node.name").await?,
-                    AttrVal::String(node_name),
+                    AttrVal::String(Cow::Owned(node_name)),
                 ));
             }
 
@@ -92,7 +96,7 @@ impl MessageProcessor {
             } => {
                 kvs.push((
                     self.interned_attr_key("event.name").await?,
-                    AttrVal::String("rmw.destroy_node".to_string()),
+                    AttrVal::String(Cow::Borrowed("rmw.destroy_node")),
                 ));
             }
 
@@ -107,7 +111,7 @@ impl MessageProcessor {
             } => {
                 kvs.push((
                     self.interned_attr_key("event.name").await?,
-                    AttrVal::String("rmw.create_publisher".to_string()),
+                    AttrVal::String(Cow::Borrowed("rmw.create_publisher")),
                 ));
 
                 kvs.push((
@@ -119,21 +123,21 @@ impl MessageProcessor {
                 if let Some(gid) = gid {
                     kvs.push((
                         self.interned_attr_key("event.ros.publisher_gid").await?,
-                        AttrVal::String(gid.to_string()),
+                        AttrVal::String(Cow::Owned(gid.to_string())),
                     ));
                 }
 
                 kvs.push((
                     self.interned_attr_key("event.ros.topic").await?,
-                    AttrVal::String(topic_name),
+                    AttrVal::String(Cow::Owned(topic_name)),
                 ));
                 kvs.push((
                     self.interned_attr_key("event.ros.schema.namespace").await?,
-                    AttrVal::String(schema_namespace),
+                    AttrVal::String(Cow::Owned(schema_namespace)),
                 ));
                 kvs.push((
                     self.interned_attr_key("event.ros.schema.name").await?,
-                    AttrVal::String(schema_name),
+                    AttrVal::String(Cow::Owned(schema_name)),
                 ));
             }
 
@@ -144,13 +148,13 @@ impl MessageProcessor {
             } => {
                 kvs.push((
                     self.interned_attr_key("event.name").await?,
-                    AttrVal::String("rmw.destroy_publisher".to_string()),
+                    AttrVal::String(Cow::Borrowed("rmw.destroy_publisher")),
                 ));
 
                 if let Some(gid) = gid {
                     kvs.push((
                         self.interned_attr_key("event.ros.publisher_gid").await?,
-                        AttrVal::String(gid.to_string()),
+                        AttrVal::String(Cow::Owned(gid.to_string())),
                     ));
                 }
             }
@@ -164,19 +168,19 @@ impl MessageProcessor {
             } => {
                 kvs.push((
                     self.interned_attr_key("event.name").await?,
-                    AttrVal::String("rmw.create_subscription".to_string()),
+                    AttrVal::String(Cow::Borrowed("rmw.create_subscription")),
                 ));
                 kvs.push((
                     self.interned_attr_key("event.ros.topic").await?,
-                    AttrVal::String(topic_name),
+                    AttrVal::String(Cow::Owned(topic_name)),
                 ));
                 kvs.push((
                     self.interned_attr_key("event.ros.schema.namespace").await?,
-                    AttrVal::String(schema_namespace),
+                    AttrVal::String(Cow::Owned(schema_namespace)),
                 ));
                 kvs.push((
                     self.interned_attr_key("event.ros.schema.name").await?,
-                    AttrVal::String(schema_name),
+                    AttrVal::String(Cow::Owned(schema_name)),
                 ));
             }
 
@@ -187,11 +191,90 @@ impl MessageProcessor {
             } => {
                 kvs.push((
                     self.interned_attr_key("event.name").await?,
-                    AttrVal::String("rmw.destroy_subscription".to_string()),
+                    AttrVal::String(Cow::Borrowed("rmw.destroy_subscription")),
                 ));
                 kvs.push((
                     self.interned_attr_key("event.ros.topic").await?,
-                    AttrVal::String(topic_name),
+                    AttrVal::String(Cow::Owned(topic_name)),
+                ));
+            }
+
+            RmwEvent::CreateService {
+                node_timeline_id: _,
+                timestamp: _,
+                service_name,
+                schema_namespace,
+                schema_name,
+            } => {
+                kvs.push((
+                    self.interned_attr_key("event.name").await?,
+                    AttrVal::String(Cow::Borrowed("rmw.create_service")),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.service.name").await?,
+                    AttrVal::String(Cow::Owned(service_name)),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.schema.namespace").await?,
+                    AttrVal::String(Cow::Owned(schema_namespace)),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.schema.name").await?,
+                    AttrVal::String(Cow::Owned(schema_name)),
+                ));
+            }
+
+            RmwEvent::DestroyService {
+                node_timeline_id: _,
+                timestamp: _,
+                service_name,
+            } => {
+                kvs.push((
+                    self.interned_attr_key("event.name").await?,
+                    AttrVal::String(Cow::Borrowed("rmw.destroy_service")),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.service.name").await?,
+                    AttrVal::String(Cow::Owned(service_name)),
+                ));
+            }
+
+            RmwEvent::CreateClient {
+                node_timeline_id: _,
+                timestamp: _,
+                service_name,
+                schema_namespace,
+                schema_name,
+            } => {
+                kvs.push((
+                    self.interned_attr_key("event.name").await?,
+                    AttrVal::String(Cow::Borrowed("rmw.create_client")),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.service.name").await?,
+                    AttrVal::String(Cow::Owned(service_name)),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.schema.namespace").await?,
+                    AttrVal::String(Cow::Owned(schema_namespace)),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.schema.name").await?,
+                    AttrVal::String(Cow::Owned(schema_name)),
+                ));
+            }
+            RmwEvent::DestroyClient {
+                node_timeline_id: _,
+                timestamp: _,
+                service_name,
+            } => {
+                kvs.push((
+                    self.interned_attr_key("event.name").await?,
+                    AttrVal::String(Cow::Borrowed("rmw.destroy_client")),
+                ));
+                kvs.push((
+                    self.interned_attr_key("event.ros.service.name").await?,
+                    AttrVal::String(Cow::Owned(service_name)),
                 ));
             }
         }
@@ -215,7 +298,7 @@ impl MessageProcessor {
 
         let mut event_attrs = vec![(
             self.interned_attr_key("event.ros.topic").await?,
-            AttrVal::String(captured_message.msg.topic_name.clone()),
+            AttrVal::String(Cow::Owned(captured_message.msg.topic_name.clone())),
         )];
 
         let kvs = &captured_message.msg.kvs;
@@ -230,7 +313,7 @@ impl MessageProcessor {
             }
             event_attrs.push((
                 self.interned_attr_key("event.name").await?,
-                AttrVal::String(event_name),
+                AttrVal::String(Cow::Owned(event_name)),
             ));
         }
 
@@ -260,7 +343,7 @@ impl MessageProcessor {
                                 "timeline.ros.publisher_gid.{normalized_topic_name}"
                             ))
                             .await?,
-                            AttrVal::String(local_gid.to_string()),
+                            AttrVal::String(Cow::Owned(local_gid.to_string())),
                         )];
 
                         self.client.timeline_metadata(attrs).await?;
@@ -285,7 +368,12 @@ impl MessageProcessor {
                             AttrVal::Integer(nsec),
                         ));
                     }
-                    crate::hooks::CapturedTime::SignedEpochNanos(_) => todo!(),
+                    crate::hooks::CapturedTime::SignedEpochNanos(nsec) => {
+                        event_attrs.push((
+                            self.interned_attr_key("event.dds_time.nanosec").await?,
+                            AttrVal::Integer(nsec),
+                        ));
+                    }
                 }
             }
             MessageDirection::Receive {
@@ -310,7 +398,7 @@ impl MessageProcessor {
                             &format!("event.interaction.remote_timeline.ros.publisher_gid.{normalized_topic_name}")
                         )
                         .await?,
-                        AttrVal::String(gid.to_string()),
+                        AttrVal::String(Cow::Owned(gid.to_string())),
                     ));
                 }
 
@@ -352,6 +440,144 @@ impl MessageProcessor {
         Ok(())
     }
 
+    async fn handle_service_event(
+        &mut self,
+        service_event: crate::hooks::ServiceEvent,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // http://wiki.ros.org/Names claims that names can't have '.' in them
+        let mut normalized_service_name = service_event.service_name.clone();
+        if normalized_service_name.starts_with('/') {
+            normalized_service_name.remove(0);
+        }
+        let normalized_service_name = normalized_service_name.replace('/', ".");
+
+        self.open_timeline(&service_event.timeline_id).await?;
+        match service_event.event_type {
+            ServiceEventType::SendRequest => {
+                // This has the potential to be somewhat wasteul; it depends on the general lifetime of a service
+                // client. In the cases I've seen so far, the client lives only for the span of a single request. If
+                // they live for longer, this can be changed to remember which service clients have sent metadata.
+                let tl_attrs = [
+                    (
+                        self.interned_attr_key(&format!(
+                            "timeline.ros.service.client_guid.{}",
+                            hex::encode(service_event.client_guid)
+                        ))
+                        .await?,
+                        AttrVal::Bool(true),
+                    ),
+                    (
+                        self.interned_attr_key(&format!(
+                            "timeline.ros.service.{}",
+                            normalized_service_name
+                        ))
+                        .await?,
+                        AttrVal::Bool(true),
+                    ),
+                ];
+                self.client.timeline_metadata(tl_attrs).await?;
+            }
+            ServiceEventType::TakeRequest => (),
+            ServiceEventType::SendResponse => (),
+            ServiceEventType::TakeResponse => (),
+        };
+
+        let mut event_attrs = vec![
+            (
+                self.interned_attr_key("event.name").await?,
+                AttrVal::String(Cow::Owned(normalized_service_name.clone())),
+            ),
+            (
+                self.interned_attr_key("event.ros.service.name").await?,
+                AttrVal::String(Cow::Owned(service_event.service_name.clone())),
+            ),
+            (
+                self.interned_attr_key("event.ros.service.event").await?,
+                AttrVal::String(Cow::Owned(service_event.event_type.to_string())),
+            ),
+        ];
+
+        if let Some(ts) = service_event.timestamp {
+            event_attrs.push((
+                self.interned_attr_key("event.timestamp").await?,
+                AttrVal::Timestamp(ts),
+            ));
+        }
+
+        match service_event.event_type {
+            ServiceEventType::SendRequest | ServiceEventType::TakeResponse => {
+                event_attrs.push((
+                    self.interned_attr_key("event.ros.service.sequence_id")
+                        .await?,
+                    AttrVal::Integer(service_event.sequence_id),
+                ));
+                event_attrs.push((
+                    self.interned_attr_key("event.ros.service.client_guid")
+                        .await?,
+                    AttrVal::String(Cow::Owned(hex::encode(service_event.client_guid))),
+                ));
+            }
+            ServiceEventType::TakeRequest | ServiceEventType::SendResponse => {
+                event_attrs.push((
+                    self.interned_attr_key(&format!(
+                        "event.interaction.remote_timeline.ros.service.client_guid.{}",
+                        hex::encode(service_event.client_guid),
+                    ))
+                    .await?,
+                    AttrVal::Bool(true),
+                ));
+                event_attrs.push((
+                    self.interned_attr_key("event.interaction.remote_event.ros.service.event")
+                        .await?,
+                    AttrVal::String(Cow::Owned(service_event.event_type.opposite().to_string())),
+                ));
+                event_attrs.push((
+                    self.interned_attr_key(
+                        "event.interaction.remote_event.ros.service.sequence_id",
+                    )
+                    .await?,
+                    AttrVal::Integer(service_event.sequence_id),
+                ));
+                event_attrs.push((
+                    self.interned_attr_key(
+                        "event.interaction.remote_event.ros.service.client_guid",
+                    )
+                    .await?,
+                    AttrVal::String(Cow::Owned(hex::encode(service_event.client_guid))),
+                ));
+                event_attrs.push((
+                    self.interned_attr_key(
+                        "event.interaction.remote_event.ros.service.sequence_id",
+                    )
+                    .await?,
+                    AttrVal::Integer(service_event.sequence_id),
+                ));
+
+                if matches!(service_event.event_type, ServiceEventType::SendResponse) {
+                    // With the available data, we're rooting the interaction at the client side, but that
+                    // makes the interaction for the response go from client -> service. This attr reverses the
+                    // direction to be service -> client.
+                    event_attrs.push((
+                        self.interned_attr_key("event.interaction.reverse").await?,
+                        AttrVal::Bool(true),
+                    ));
+                }
+            }
+        }
+
+        for (mut k, v) in service_event.kvs {
+            if !k.starts_with("event.") {
+                k = format!("event.{k}");
+            }
+            event_attrs.push((self.interned_attr_key(&k).await?, v));
+        }
+
+        self.client.event(self.ordering, event_attrs).await?;
+        self.ordering += 1;
+
+        Ok(())
+    }
+
     async fn open_timeline(
         &mut self,
         timeline_id: &TimelineId,
@@ -380,20 +606,20 @@ impl MessageProcessor {
             let tl_attrs = vec![
                 (
                     self.interned_attr_key("timeline.name").await?,
-                    AttrVal::String(timeline_name),
+                    AttrVal::String(Cow::Owned(timeline_name)),
                 ),
                 (
                     self.interned_attr_key("timeline.ros.node.name").await?,
-                    AttrVal::String(node_name.to_string()),
+                    AttrVal::String(Cow::Owned(node_name.to_string())),
                 ),
                 (
                     self.interned_attr_key("timeline.ros.node.namespace")
                         .await?,
-                    AttrVal::String(node_namespace.to_string()),
+                    AttrVal::String(Cow::Owned(node_namespace.to_string())),
                 ),
                 (
                     self.interned_attr_key("timeline.ros.node").await?,
-                    AttrVal::String(format!("{}/{}", node_namespace, node_name)),
+                    AttrVal::String(Cow::Owned(format!("{}/{}", node_namespace, node_name))),
                 ),
             ];
 

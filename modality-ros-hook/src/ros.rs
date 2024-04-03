@@ -10,12 +10,10 @@ use std::{
 use widestring::U16CStr;
 
 #[allow(improper_ctypes)]
-#[allow(clippy::upper_case_acronyms)]
+#[allow(clippy::all)]
 mod raw {
-
     use super::*;
-
-    include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
+    include!(concat!(env!("OUT_DIR"), "/rmw_bindings.rs"));
 
     impl rosidl_runtime_c__String {
         pub unsafe fn as_string(&self) -> String {
@@ -30,6 +28,13 @@ mod raw {
     }
 }
 
+#[allow(improper_ctypes)]
+#[allow(clippy::all)]
+mod raw_rtps {
+    use super::*;
+    include!(concat!(env!("OUT_DIR"), "/rtps_bindings.rs"));
+}
+
 pub unsafe fn debug_c_str(s: *const c_char) -> Cow<'static, str> {
     if s.is_null() {
         "<NULL>".into()
@@ -40,32 +45,24 @@ pub unsafe fn debug_c_str(s: *const c_char) -> Cow<'static, str> {
 
 pub mod rosidl {
     pub use super::raw::rosidl_message_type_support_t as message_type_support;
+    pub use super::raw::rosidl_service_type_support_t as service_type_support;
     use super::*;
 
     pub mod runtime {
         use super::*;
 
+        pub use raw::get_message_typesupport_handle;
+        pub use raw::get_service_typesupport_handle;
         pub use raw::rosidl_runtime_c__String as String;
         pub use raw::rosidl_runtime_c__U16String as U16String;
         pub use raw::rosidl_runtime_c__byte__Sequence as ByteSequence;
-
-        // Ported from rosidl_runtime_c
-        pub unsafe fn get_message_typesupport_handle(
-            handle: *const message_type_support,
-            identifier: *const c_char,
-        ) -> *const message_type_support {
-            assert!(!handle.is_null(), "Null message typesupport handle");
-            let func = (*handle)
-                .func
-                .expect("Null message typesupport handle function");
-            func(handle, identifier)
-        }
     }
 
     pub mod typesupport_introspection {
         use super::*;
         pub use raw::rosidl_typesupport_introspection_c__MessageMember as MessageMember;
         pub use raw::rosidl_typesupport_introspection_c__MessageMembers as MessageMembers;
+        pub use raw::rosidl_typesupport_introspection_c__ServiceMembers_s as ServiceMembers;
         pub use raw::rosidl_typesupport_introspection_c_field_types as field_type;
 
         // from rosidl_typesupport_introspection_c
@@ -104,10 +101,14 @@ pub mod rosidl {
 
 pub mod rmw {
     use super::*;
+    pub use raw::rmw_client_t as client;
     pub use raw::rmw_get_gid_for_publisher as get_gid_for_publisher;
     pub use raw::rmw_gid_t as gid;
     pub use raw::rmw_message_info_t as message_info;
     pub use raw::rmw_publisher_t as publisher;
+    pub use raw::rmw_request_id_t as request_id;
+    pub use raw::rmw_service_info_t as service_info;
+    pub use raw::rmw_service_t as service;
 
     // Ported from rmw_cyclonedds
     // iiuc, this is like QueryInterface, more or less
@@ -127,4 +128,27 @@ pub mod rmw {
             rosidl::typesupport_introspection::CPP_IDENTIFIER.as_ptr(),
         )
     }
+
+    pub unsafe fn get_service_typesupport(
+        type_supports: *const rosidl::service_type_support,
+    ) -> *const rosidl::service_type_support {
+        let ts = rosidl::runtime::get_service_typesupport_handle(
+            type_supports,
+            rosidl::typesupport_introspection::C_IDENTIFIER.as_ptr(),
+        );
+        if !ts.is_null() {
+            return ts;
+        }
+
+        rosidl::runtime::get_service_typesupport_handle(
+            type_supports,
+            rosidl::typesupport_introspection::CPP_IDENTIFIER.as_ptr(),
+        )
+    }
+}
+
+pub mod fastrtps {
+    use super::*;
+    pub use raw_rtps::CustomClientInfo;
+    pub use raw_rtps::CustomServiceInfo;
 }

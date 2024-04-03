@@ -1,6 +1,6 @@
 [package]
 name = "modality-ros-hook"
-version = "0.1.2"
+version = "0.5.0"
 edition = "2021"
 authors = [
     "Russell Mull <russell@auxon.io>",
@@ -20,9 +20,9 @@ widestring = "1"
 tokio = { version = "1", features = ["rt", "sync"] }
 fxhash = "0.2"
 itertools = "0.10"
+hex = "0.4"
 
-modality-api = "0.1"
-modality-ingest-client = "0.2"
+auxon-sdk = { version = "1.2", features = ["modality"] }
 
 [build-dependencies]
 bindgen = "0.69"

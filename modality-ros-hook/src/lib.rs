@@ -1,14 +1,18 @@
+use auxon_sdk::api::{AttrVal, BigInt};
+use config::CONFIG;
 use core::slice;
 use itertools::Itertools;
-use modality_api::{AttrVal, BigInt};
-use std::ffi::{c_char, c_void, CStr};
+use std::{
+    borrow::Cow,
+    ffi::{c_char, c_void, CStr},
+};
 
+mod config;
 mod hooks;
 mod message_processor;
 mod ros;
 
 #[derive(Debug, Clone)]
-#[allow(unused)]
 pub struct RosMessageSchema {
     pub namespace: String,
     pub name: String,
@@ -39,7 +43,6 @@ pub enum RosMessageMemberSchema {
 }
 
 #[derive(Debug, Clone)]
-#[allow(unused)]
 pub struct FlatRosMessageSchema {
     namespace: String,
     name: String,
@@ -85,7 +88,9 @@ pub struct MessageSequenceMemberSchema {
 
 impl RosMessageSchema {
     #[allow(clippy::if_same_then_else)]
-    unsafe fn from_c(type_support: *const ros::rosidl::message_type_support) -> Option<Self> {
+    unsafe fn from_message_type_support(
+        type_support: *const ros::rosidl::message_type_support,
+    ) -> Option<Self> {
         let ts = ros::rmw::get_typesupport(type_support);
 
         let ts_id = CStr::from_ptr((*ts).typesupport_identifier);
@@ -96,62 +101,14 @@ impl RosMessageSchema {
                 // they're actually the same exact memory layout
                 std::mem::transmute((*ts).data)
             } else {
-                unimplemented!(
-                    "unknown typesupport type: {}",
+                eprintln!(
+                    "Modality probe: unknown typesupport type: {}",
                     ros::debug_c_str((*ts).typesupport_identifier)
-                )
+                );
+                return None;
             };
 
-        let c_members: &[ros::rosidl::typesupport_introspection::MessageMember] =
-            std::slice::from_raw_parts((*c_schema).members_, (*c_schema).member_count_ as usize);
-        let mut members = vec![];
-        for c_member in c_members {
-            let name =
-                String::from_utf8_lossy(CStr::from_ptr(c_member.name_).to_bytes()).to_string();
-            let type_id = c_member.type_id_ as u32;
-            let offset = c_member.offset_ as usize;
-
-            let member = if c_member.is_array_ {
-                let item_schema = if type_id
-                    == ros::rosidl::typesupport_introspection::field_types::ROS_TYPE_MESSAGE
-                {
-                    Box::new(RosMessageMemberSchema::NestedMessage {
-                        name,
-                        offset,
-                        schema: RosMessageSchema::from_c(c_member.members_).unwrap(),
-                    })
-                } else {
-                    Box::new(RosMessageMemberSchema::Scalar {
-                        name,
-                        type_id,
-                        offset,
-                    })
-                };
-                RosMessageMemberSchema::Array {
-                    item_schema,
-                    offset,
-                    array_size: c_member.array_size_,
-                    is_upper_bound: c_member.is_upper_bound_,
-                    size_function: c_member.size_function,
-                    get_function: c_member.get_const_function,
-                }
-            } else if type_id
-                == ros::rosidl::typesupport_introspection::field_types::ROS_TYPE_MESSAGE
-            {
-                RosMessageMemberSchema::NestedMessage {
-                    name,
-                    offset,
-                    schema: RosMessageSchema::from_c(c_member.members_).unwrap(),
-                }
-            } else {
-                RosMessageMemberSchema::Scalar {
-                    name,
-                    type_id,
-                    offset,
-                }
-            };
-            members.push(member);
-        }
+        let members = convert_c_message_members_to_schemas(c_schema)?;
 
         Some(RosMessageSchema {
             namespace: String::from_utf8_lossy(
@@ -166,18 +123,68 @@ impl RosMessageSchema {
     }
 
     pub fn flatten(self, prefix: &Vec<String>) -> FlatRosMessageSchema {
-        let mut members = vec![];
-        for member in self.members.into_iter() {
-            member.flatten(prefix, 0, &mut members);
-        }
-
-        FlatRosMessageSchema {
-            namespace: self.namespace,
-            name: self.name,
-            size: self.size,
-            members,
-        }
+        FlatRosMessageSchema::from_nested_members(
+            self.namespace,
+            self.name,
+            self.size,
+            self.members,
+            prefix,
+        )
     }
+}
+
+unsafe fn convert_c_message_members_to_schemas(
+    c_schema: *const ros::rosidl::typesupport_introspection::MessageMembers,
+) -> Option<Vec<RosMessageMemberSchema>> {
+    let c_members: &[ros::rosidl::typesupport_introspection::MessageMember] =
+        std::slice::from_raw_parts((*c_schema).members_, (*c_schema).member_count_ as usize);
+    let mut members = vec![];
+    for c_member in c_members {
+        let name = String::from_utf8_lossy(CStr::from_ptr(c_member.name_).to_bytes()).to_string();
+        let type_id = c_member.type_id_ as u32;
+        let offset = c_member.offset_ as usize;
+
+        let member = if c_member.is_array_ {
+            let item_schema = if type_id
+                == ros::rosidl::typesupport_introspection::field_types::ROS_TYPE_MESSAGE
+            {
+                Box::new(RosMessageMemberSchema::NestedMessage {
+                    name,
+                    offset,
+                    schema: RosMessageSchema::from_message_type_support(c_member.members_)?,
+                })
+            } else {
+                Box::new(RosMessageMemberSchema::Scalar {
+                    name,
+                    type_id,
+                    offset,
+                })
+            };
+            RosMessageMemberSchema::Array {
+                item_schema,
+                offset,
+                array_size: c_member.array_size_,
+                is_upper_bound: c_member.is_upper_bound_,
+                size_function: c_member.size_function,
+                get_function: c_member.get_const_function,
+            }
+        } else if type_id == ros::rosidl::typesupport_introspection::field_types::ROS_TYPE_MESSAGE {
+            RosMessageMemberSchema::NestedMessage {
+                name,
+                offset,
+                schema: RosMessageSchema::from_message_type_support(c_member.members_)?,
+            }
+        } else {
+            RosMessageMemberSchema::Scalar {
+                name,
+                type_id,
+                offset,
+            }
+        };
+        members.push(member);
+    }
+
+    Some(members)
 }
 
 impl RosMessageMemberSchema {
@@ -195,7 +202,6 @@ impl RosMessageMemberSchema {
         initial_offset: usize,
         target: &mut Vec<FlatRosMessageMemberSchema>,
     ) {
-        // let name = self.name().to_string();
         match self {
             RosMessageMemberSchema::Scalar {
                 name,
@@ -279,7 +285,54 @@ impl RosMessageMemberSchema {
 }
 
 impl FlatRosMessageSchema {
-    fn interpret_message<'a>(
+    fn from_nested_members(
+        namespace: String,
+        name: String,
+        size: usize,
+        members: Vec<RosMessageMemberSchema>,
+        prefix: &Vec<String>,
+    ) -> Self {
+        let mut flat_members: Vec<FlatRosMessageMemberSchema> = vec![];
+        for member in members.into_iter() {
+            member.flatten(prefix, 0, &mut flat_members);
+        }
+
+        Self {
+            namespace,
+            name,
+            size,
+            members: flat_members,
+        }
+    }
+
+    fn interpret_single_message<'a>(&'a self, message: &'a [u8]) -> Vec<(String, AttrVal)> {
+        let mut kvs = vec![
+            (
+                "event.ros.schema.namespace".to_string(),
+                AttrVal::String(Cow::Owned(self.namespace.clone())),
+            ),
+            (
+                "event.ros.schema.name".to_string(),
+                AttrVal::String(Cow::Owned(self.name.clone())),
+            ),
+        ];
+
+        self.interpret_message_internal(None, message, &mut kvs);
+
+        if let Some(msg) = extract_log_message(self, &kvs) {
+            if let Some((_, v)) = kvs
+                .iter_mut()
+                .find(|(k, _v)| k == "name" || k == "event.name")
+            {
+                *v = msg;
+            } else {
+                kvs.push(("event.name".to_string(), msg));
+            }
+        }
+        kvs
+    }
+
+    fn interpret_potentially_compound_message<'a>(
         &'a self,
         message: &'a [u8],
     ) -> impl Iterator<Item = Vec<(String, AttrVal)>> + 'a {
@@ -291,11 +344,11 @@ impl FlatRosMessageSchema {
             let mut kvs = vec![
                 (
                     "event.ros.schema.namespace".to_string(),
-                    AttrVal::String(self.namespace.clone()),
+                    AttrVal::String(Cow::Owned(self.namespace.to_owned())),
                 ),
                 (
                     "event.ros.schema.name".to_string(),
-                    AttrVal::String(self.name.clone()),
+                    AttrVal::String(Cow::Owned(self.name.to_owned())),
                 ),
             ];
 
@@ -336,11 +389,11 @@ impl FlatRosMessageSchema {
         let mut common_kvs = vec![
             (
                 "event.ros.schema.namespace".to_string(),
-                AttrVal::String(self.namespace.clone()),
+                AttrVal::String(Cow::Owned(self.namespace.to_owned())),
             ),
             (
                 "event.ros.schema.name".to_string(),
-                AttrVal::String(self.name.clone()),
+                AttrVal::String(Cow::Owned(self.name.to_owned())),
             ),
         ];
         for member in self.members.iter() {
@@ -375,9 +428,10 @@ impl FlatRosMessageSchema {
                             ) {
                                 let ks = normalize_string_for_attr_key(k.to_string());
                                 kvs.push((ks.clone(), v.clone()));
-                                kvs.push((format!("{ks}.key"), AttrVal::String(k.to_string())));
-                            } else {
-                                // TODO ???
+                                kvs.push((
+                                    format!("{ks}.key"),
+                                    AttrVal::String(Cow::Owned(k.to_string())),
+                                ));
                             }
 
                             Some(())
@@ -402,6 +456,66 @@ impl FlatRosMessageSchema {
         }
 
         events.into_iter()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RosServiceSchema {
+    pub namespace: String,
+    pub name: String,
+    pub request_members: FlatRosMessageSchema,
+    pub response_members: FlatRosMessageSchema,
+}
+
+impl RosServiceSchema {
+    unsafe fn from_service_type_support(
+        type_support: *const ros::rosidl::service_type_support,
+    ) -> Option<Self> {
+        let ts = ros::rmw::get_service_typesupport(type_support);
+
+        let ts_id = CStr::from_ptr((*ts).typesupport_identifier);
+        let c_schema: *const ros::rosidl::typesupport_introspection::ServiceMembers =
+            if ts_id == ros::rosidl::typesupport_introspection::C_IDENTIFIER {
+                std::mem::transmute((*ts).data)
+            } else if ts_id == ros::rosidl::typesupport_introspection::CPP_IDENTIFIER {
+                // they're actually the same exact memory layout
+                std::mem::transmute((*ts).data)
+            } else {
+                eprintln!(
+                    "Modality probe: unknown typesupport type: {}",
+                    ros::debug_c_str((*ts).typesupport_identifier)
+                );
+                return None;
+            };
+        let namespace =
+            String::from_utf8_lossy(CStr::from_ptr((*c_schema).service_namespace_).to_bytes())
+                .to_string();
+        let name = String::from_utf8_lossy(CStr::from_ptr((*c_schema).service_name_).to_bytes())
+            .to_string();
+        let request_members = convert_c_message_members_to_schemas((*c_schema).request_members_)?;
+        let request_size = (*(*c_schema).request_members_).size_of_;
+
+        let response_members = convert_c_message_members_to_schemas((*c_schema).response_members_)?;
+        let response_size = (*(*c_schema).response_members_).size_of_;
+
+        Some(RosServiceSchema {
+            namespace: namespace.clone(),
+            name: name.clone(),
+            request_members: FlatRosMessageSchema::from_nested_members(
+                namespace.clone(),
+                name.clone(),
+                request_size,
+                request_members,
+                &vec![],
+            ),
+            response_members: FlatRosMessageSchema::from_nested_members(
+                namespace,
+                name,
+                response_size,
+                response_members,
+                &vec![],
+            ),
+        })
     }
 }
 
@@ -548,8 +662,7 @@ impl ScalarArrayMemberSchema {
                     (*seq).size
                 };
 
-                if scalar_array_len > 12 {
-                    //eprintln!("skipping large array: {scalar_array_len}");
+                if scalar_array_len > CONFIG.max_array_len {
                     return Some(());
                 }
 
@@ -633,11 +746,11 @@ unsafe fn ros_to_attr_val(
     Some(match type_id {
         ROS_TYPE_STRING => {
             let rt_str: *const ros::rosidl::runtime::String = std::mem::transmute(ptr);
-            AttrVal::String((*rt_str).as_string())
+            AttrVal::String(Cow::Owned((*rt_str).as_string()))
         }
         ROS_TYPE_WSTRING => {
             let rt_str: *const ros::rosidl::runtime::U16String = std::mem::transmute(ptr);
-            AttrVal::String((*rt_str).as_string()?)
+            AttrVal::String(Cow::Owned((*rt_str).as_string()?))
         }
         ROS_TYPE_FLOAT => AttrVal::Float(
             (f32::from_ne_bytes(slice::from_raw_parts(ptr, 4).try_into().ok()?) as f64).into(),
@@ -648,26 +761,17 @@ unsafe fn ros_to_attr_val(
         ROS_TYPE_LONG_DOUBLE => {
             return None;
         }
-        ROS_TYPE_CHAR => AttrVal::String(
+        ROS_TYPE_CHAR => AttrVal::String(Cow::Owned(
             c_char::from_ne_bytes(slice::from_raw_parts(ptr, 1).try_into().ok()?).to_string(),
-        ),
+        )),
         ROS_TYPE_WCHAR => {
             let wchar = u16::from_ne_bytes(slice::from_raw_parts(ptr, 2).try_into().ok()?);
-            AttrVal::String(String::from_utf16_lossy(&[wchar]))
+            AttrVal::String(Cow::Owned(String::from_utf16_lossy(&[wchar])))
         }
         ROS_TYPE_BOOLEAN => AttrVal::Bool(*ptr != 0),
-        ROS_TYPE_OCTET | ROS_TYPE_UINT8 => {
-            AttrVal::Integer(
-                u8::from_ne_bytes(slice::from_raw_parts(ptr, 1).try_into().ok()?) as i64,
-            )
-
-            /*if ptr as usize <= 0xFF {
-                println!("u8: {}", ptr as i64);
-                println!("ptr-u8: {}", *ptr);
-                println!("as attrval: {av:?}");
-                panic!("definitely not a pointer");
-            }*/
-        }
+        ROS_TYPE_OCTET | ROS_TYPE_UINT8 => AttrVal::Integer(u8::from_ne_bytes(
+            slice::from_raw_parts(ptr, 1).try_into().ok()?,
+        ) as i64),
         /*ROS_INT8*/
         9 => AttrVal::Integer(
             i8::from_ne_bytes(slice::from_raw_parts(ptr, 1).try_into().ok()?) as i64,

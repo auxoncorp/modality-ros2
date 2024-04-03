@@ -1,0 +1,10 @@
+CompileFlags:
+  Add:
+    - -Iros-deps-for-development/rmw/rmw/include
+    - -Iros-deps-for-development/rosidl/rosidl_runtime_c/include
+    - -Iros-deps-for-development/rosidl/rosidl_typesupport_introspection_c/include
+    - -Iros-deps-for-development/rosidl/rosidl_typesupport_interface/include
+    - -Iros-deps-for-development/rosidl/rosidl_typesupport_interface/include
+    - -Iros-deps-for-development/rmw_fastrtps/rmw_fastrtps_dynamic_cpp/include
+    - -Iros-deps-for-development/rmw_fastrtps/rmw_fastrtps_shared_cpp/include
+    - -Iros-deps-for-development/rmw_fastrtps/rmw_fastrtps_cpp/include

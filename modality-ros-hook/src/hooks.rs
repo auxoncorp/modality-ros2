@@ -1,8 +1,11 @@
-use crate::{message_processor::MessageProcessor, ros, FlatRosMessageSchema, RosMessageSchema};
+use crate::{
+    config::CONFIG, message_processor::MessageProcessor, ros, FlatRosMessageSchema,
+    RosMessageSchema, RosServiceSchema,
+};
 use arc_swap::ArcSwap;
 use archery::ArcK;
+use auxon_sdk::api::{AttrVal, Nanoseconds, TimelineId};
 use lazy_static::lazy_static;
-use modality_api::{AttrVal, Nanoseconds, TimelineId};
 
 use std::{
     cell::RefCell,
@@ -10,38 +13,45 @@ use std::{
 };
 
 thread_local! {
-    /// When we intercept a message from rmw_publish, it goes in
-    /// here. Then the next time we see clock_gettime on the same
-    /// thread (called by the DDS layer for the transport-level
-    /// timestamp), we capture the time, add it to the message, and put
+    /// When we intercept a message from rmw_publish, it goes in here. Then the next time we see clock_gettime on the same
+    /// thread (called by the DDS layer for the transport-level timestamp), we capture the time, add it to the message, and put
     /// it on SEND_CH for processing.
     pub static LAST_CAPTURED_MESSAGE: RefCell<Option<Vec<CapturedMessage>>> = const { RefCell::new(None) }
 }
 
 lazy_static! {
     static ref NODES: ArcSwap<rpds::HashTrieMap<NodePtr, NodeState, ArcK>> = Default::default();
-    static ref PUBLISHERS: ArcSwap<rpds::HashTrieMap<PublisherPtr, PublisherState, ArcK>> = Default::default();
-    static ref SUBSCRIPTIONS: ArcSwap<rpds::HashTrieMap<SubscriptionPtr, SubscriptionState, ArcK>> = Default::default();
-
-    static ref IGNORED_TOPICS: ArcSwap<rpds::HashTrieSet<String, ArcK>> = {
-        let topics = rpds::HashTrieSet::default();
-        // TODO make this configurable
-        let topics = topics.insert("/parameter_events".to_string());
-        ArcSwap::new(std::sync::Arc::new(topics))
-    };
-
+    static ref PUBLISHERS: ArcSwap<rpds::HashTrieMap<PublisherPtr, PublisherState, ArcK>> =
+        Default::default();
+    static ref SUBSCRIPTIONS: ArcSwap<rpds::HashTrieMap<SubscriptionPtr, SubscriptionState, ArcK>> =
+        Default::default();
+    static ref SERVICES: ArcSwap<rpds::HashTrieMap<ServicePtr, ServiceState, ArcK>> =
+        Default::default();
+    static ref CLIENTS: ArcSwap<rpds::HashTrieMap<ClientPtr, ClientState, ArcK>> =
+        Default::default();
     static ref SEND_CH: tokio::sync::mpsc::UnboundedSender<RosEvent> = {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel(); // TODO bounded?
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
 
         std::thread::spawn(|| {
-            let rt = tokio::runtime::Builder::new_current_thread()
+            let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_io()
                 .enable_time()
                 .build()
-                .unwrap();
+            {
+                Ok(rt) => rt,
+                Err(e) => {
+                    eprintln!("Failed to initialize Modality probe tokio runtime: {e:?}");
+                    return;
+                }
+            };
+
             rt.block_on(async {
-                let processor = MessageProcessor::new().await.expect("Initialize Modality message processor thread");
-                processor.message_loop(rx).await;
+                match MessageProcessor::new().await {
+                    Ok(processor) => processor.message_loop(rx).await,
+                    Err(e) => {
+                        eprintln!("Failed to initialize Modality probe message processor: {e:?}");
+                    }
+                }
             });
         });
 
@@ -63,12 +73,10 @@ struct NodeState {
 
 /// The unique identifier (gid) of a publisher.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-// TODO this size seems to have changed in humble? check that.
 pub struct PublisherGraphId([u8; 24]);
 
 impl std::fmt::Display for PublisherGraphId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("0x")?;
         for b in self.0.iter() {
             write!(f, "{b:02x}")?;
         }
@@ -108,6 +116,7 @@ struct SubscriptionState {
 
 pub enum RosEvent {
     Message(CapturedMessageWithTime),
+    ServiceEvent(ServiceEvent),
     Rmw(RmwEvent),
 }
 
@@ -159,6 +168,30 @@ pub enum RmwEvent {
         node_timeline_id: TimelineId,
         timestamp: Option<Nanoseconds>,
         topic: String,
+    },
+    CreateService {
+        node_timeline_id: TimelineId,
+        timestamp: Option<Nanoseconds>,
+        service_name: String,
+        schema_namespace: String,
+        schema_name: String,
+    },
+    DestroyService {
+        node_timeline_id: TimelineId,
+        timestamp: Option<Nanoseconds>,
+        service_name: String,
+    },
+    CreateClient {
+        node_timeline_id: TimelineId,
+        timestamp: Option<Nanoseconds>,
+        service_name: String,
+        schema_namespace: String,
+        schema_name: String,
+    },
+    DestroyClient {
+        node_timeline_id: TimelineId,
+        timestamp: Option<Nanoseconds>,
+        service_name: String,
     },
 }
 
@@ -250,20 +283,32 @@ impl RmwEvent {
         match self {
             RmwEvent::CreateNode {
                 node_timeline_id, ..
-            } => node_timeline_id,
-            RmwEvent::DestroyNode {
+            }
+            | RmwEvent::DestroyNode {
                 node_timeline_id, ..
-            } => node_timeline_id,
-            RmwEvent::CreatePublisher {
+            }
+            | RmwEvent::CreatePublisher {
                 node_timeline_id, ..
-            } => node_timeline_id,
-            RmwEvent::DestroyPublisher {
+            }
+            | RmwEvent::DestroyPublisher {
                 node_timeline_id, ..
-            } => node_timeline_id,
-            RmwEvent::CreateSubscription {
+            }
+            | RmwEvent::CreateSubscription {
                 node_timeline_id, ..
-            } => node_timeline_id,
-            RmwEvent::DestroySubscription {
+            }
+            | RmwEvent::DestroySubscription {
+                node_timeline_id, ..
+            }
+            | RmwEvent::CreateService {
+                node_timeline_id, ..
+            }
+            | RmwEvent::DestroyService {
+                node_timeline_id, ..
+            }
+            | RmwEvent::CreateClient {
+                node_timeline_id, ..
+            }
+            | RmwEvent::DestroyClient {
                 node_timeline_id, ..
             } => node_timeline_id,
         }
@@ -271,12 +316,16 @@ impl RmwEvent {
 
     pub fn timestamp(&self) -> &Option<Nanoseconds> {
         match self {
-            RmwEvent::CreateNode { timestamp, .. } => timestamp,
-            RmwEvent::DestroyNode { timestamp, .. } => timestamp,
-            RmwEvent::CreatePublisher { timestamp, .. } => timestamp,
-            RmwEvent::DestroyPublisher { timestamp, .. } => timestamp,
-            RmwEvent::CreateSubscription { timestamp, .. } => timestamp,
-            RmwEvent::DestroySubscription { timestamp, .. } => timestamp,
+            RmwEvent::CreateNode { timestamp, .. }
+            | RmwEvent::DestroyNode { timestamp, .. }
+            | RmwEvent::CreatePublisher { timestamp, .. }
+            | RmwEvent::DestroyPublisher { timestamp, .. }
+            | RmwEvent::CreateSubscription { timestamp, .. }
+            | RmwEvent::DestroySubscription { timestamp, .. }
+            | RmwEvent::CreateService { timestamp, .. }
+            | RmwEvent::DestroyService { timestamp, .. }
+            | RmwEvent::CreateClient { timestamp, .. }
+            | RmwEvent::DestroyClient { timestamp, .. } => timestamp,
         }
     }
 }
@@ -328,6 +377,71 @@ impl CapturedTime {
     }
 }
 
+#[derive(Debug)]
+pub struct ServiceEvent {
+    pub timeline_id: TimelineId,
+
+    /// The timestamp captured at the point of our hook
+    /// function. Publish and receive timestamps are available in the
+    /// RMW api at some points, but not consistently enough for us to
+    /// use them here.
+    pub timestamp: Option<Nanoseconds>,
+    pub service_name: String,
+    pub event_type: ServiceEventType,
+
+    /// The uuid of a client, in a service interaction. This is stored
+    /// as 'reader_guid' in a service client, and shows up as
+    /// 'writer_guid' on the service side.
+    pub client_guid: [u8; 16],
+    pub sequence_id: i64,
+    pub kvs: Vec<(String, AttrVal)>,
+}
+
+#[derive(Debug)]
+pub enum ServiceEventType {
+    SendRequest,
+    TakeRequest,
+    SendResponse,
+    TakeResponse,
+}
+
+impl ServiceEventType {
+    pub fn opposite(&self) -> Self {
+        match self {
+            ServiceEventType::SendRequest => ServiceEventType::TakeRequest,
+            ServiceEventType::TakeRequest => ServiceEventType::SendRequest,
+            ServiceEventType::SendResponse => ServiceEventType::TakeResponse,
+            ServiceEventType::TakeResponse => ServiceEventType::SendResponse,
+        }
+    }
+}
+
+impl std::fmt::Display for ServiceEventType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            ServiceEventType::SendRequest => "send_request",
+            ServiceEventType::TakeRequest => "recv_request",
+            ServiceEventType::SendResponse => "send_response",
+            ServiceEventType::TakeResponse => "recv_response",
+        };
+        f.write_str(s)
+    }
+}
+
+type ServicePtr = usize;
+struct ServiceState {
+    schema: RosServiceSchema,
+    node_timeline_id: TimelineId,
+    service_name: String,
+}
+
+type ClientPtr = usize;
+struct ClientState {
+    schema: RosServiceSchema,
+    node_timeline_id: TimelineId,
+    service_name: String,
+}
+
 #[no_mangle]
 unsafe extern "C" fn modality_after_rmw_create_node(
     name: *const c_char,
@@ -336,9 +450,6 @@ unsafe extern "C" fn modality_after_rmw_create_node(
 ) {
     let node_name = String::from_utf8_lossy(CStr::from_ptr(name).to_bytes()).to_string();
     let node_namespace = String::from_utf8_lossy(CStr::from_ptr(namespace).to_bytes()).to_string();
-
-    println!("**************************************************");
-    println!("rmw_create_node, {node_namespace} {node_name}");
 
     let node_timeline_id = TimelineId::allocate();
 
@@ -380,12 +491,12 @@ unsafe extern "C" fn modality_after_rmw_create_publisher(
     let topic_name_str = String::from_utf8_lossy(CStr::from_ptr(topic_name).to_bytes())
         .trim()
         .to_string();
-    if IGNORED_TOPICS.load().contains(&topic_name_str) {
+    if CONFIG.ignored_topics.contains(&topic_name_str) {
         // shortcut return for ignored topics
         return;
     }
 
-    let mut maybe_schema = RosMessageSchema::from_c(type_support);
+    let maybe_schema = RosMessageSchema::from_message_type_support(type_support);
 
     let mut graph_id = None;
     let mut c_gid: ros::rmw::gid = std::mem::zeroed(); // good as anything?
@@ -394,7 +505,7 @@ unsafe extern "C" fn modality_after_rmw_create_publisher(
     }
 
     let mut pub_count = 0;
-    if let Some(message_schema) = maybe_schema.take() {
+    if let Some(message_schema) = maybe_schema {
         PUBLISHERS.rcu(|pubs| {
             pub_count = pubs.size() + 1;
             pubs.insert(
@@ -448,7 +559,7 @@ unsafe extern "C" fn modality_before_rmw_publish(pub_ptr: PublisherPtr, message:
     let mut captured_messages = vec![];
     for kvs in pub_state
         .message_schema
-        .interpret_message(src_message_bytes)
+        .interpret_potentially_compound_message(src_message_bytes)
     {
         let topic_name = pub_state.topic_name.clone();
         let node_namespace = pub_state.node_namespace.clone();
@@ -494,7 +605,7 @@ unsafe extern "C" fn modality_after_clock_gettime(clock_id: usize, timespec: *co
         return;
     }
 
-    let _called_after_dest = LAST_CAPTURED_MESSAGE
+    let _ = LAST_CAPTURED_MESSAGE
         .try_with(|b| {
             if let Some(msgs) = b.borrow_mut().take() {
                 for msg in msgs.into_iter() {
@@ -532,12 +643,12 @@ unsafe extern "C" fn modality_after_rmw_create_subscription(
     let topic_name_str = String::from_utf8_lossy(CStr::from_ptr(topic_name).to_bytes())
         .trim()
         .to_string();
-    if IGNORED_TOPICS.load().contains(&topic_name_str) {
+    if CONFIG.ignored_topics.contains(&topic_name_str) {
         // shortcut return for ignored topics
         return;
     }
 
-    let Some(message_schema) = RosMessageSchema::from_c(type_support) else {
+    let Some(message_schema) = RosMessageSchema::from_message_type_support(type_support) else {
         return;
     };
 
@@ -596,7 +707,7 @@ unsafe extern "C" fn modality_after_rmw_take_with_info(
 
     for kvs in sub_state
         .message_schema
-        .interpret_message(src_message_bytes)
+        .interpret_potentially_compound_message(src_message_bytes)
     {
         let topic_name = sub_state.topic_name.clone();
         let node_namespace = sub_state.node_namespace.clone();
@@ -630,15 +741,269 @@ unsafe extern "C" fn modality_after_rmw_take_with_info(
         let _ = SEND_CH.send(msg.into());
     }
 }
-// TODO take sequence
 
-// RMW_PUBLIC
-// RMW_WARN_UNUSED
-// rmw_ret_t
-// rmw_take_sequence(
-//   const rmw_subscription_t * subscription,
-//   size_t count,
-//   rmw_message_sequence_t * message_sequence,
-//   rmw_message_info_sequence_t * message_info_sequence,
-//   size_t * taken,
-//   rmw_subscription_allocation_t * allocation);
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_create_service(
+    node_ptr: NodePtr,
+    service: *const ros::rmw::service,
+    type_support: *const ros::rosidl::service_type_support,
+    service_name: *const c_char,
+) {
+    let nodes = NODES.load();
+    let Some(node_state) = nodes.get(&node_ptr) else {
+        return;
+    };
+
+    let service_name_str = String::from_utf8_lossy(CStr::from_ptr(service_name).to_bytes())
+        .trim()
+        .to_string();
+
+    let maybe_schema = RosServiceSchema::from_service_type_support(type_support);
+    if let Some(service_schema) = maybe_schema {
+        SERVICES.rcu(|services| {
+            services.insert(
+                service as usize,
+                ServiceState {
+                    schema: service_schema.clone(),
+                    node_timeline_id: node_state.timeline_id,
+                    service_name: service_name_str.clone(),
+                },
+            )
+        });
+
+        let _ = SEND_CH.send(
+            RmwEvent::CreateService {
+                node_timeline_id: node_state.timeline_id,
+                timestamp: now(),
+                service_name: service_name_str,
+                schema_namespace: service_schema.name.clone(),
+                schema_name: service_schema.namespace.clone(),
+            }
+            .into(),
+        );
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_destroy_service(destroyed_service_addr: usize) {
+    if let Some(service_state) = SERVICES.load().get(&destroyed_service_addr) {
+        let _ = SEND_CH.send(
+            RmwEvent::DestroyService {
+                node_timeline_id: service_state.node_timeline_id,
+                timestamp: now(),
+                service_name: service_state.service_name.clone(),
+            }
+            .into(),
+        );
+    }
+
+    SERVICES.rcu(|services| services.remove(&destroyed_service_addr));
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_create_client(
+    node_ptr: NodePtr,
+    client: ClientPtr,
+    type_support: *const ros::rosidl::service_type_support,
+    service_name: *const c_char,
+) {
+    let nodes = NODES.load();
+    let Some(node_state) = nodes.get(&node_ptr) else {
+        return;
+    };
+
+    let service_name_str = String::from_utf8_lossy(CStr::from_ptr(service_name).to_bytes())
+        .trim()
+        .to_string();
+
+    let maybe_schema = RosServiceSchema::from_service_type_support(type_support);
+    if let Some(client_schema) = maybe_schema {
+        CLIENTS.rcu(|clients| {
+            clients.insert(
+                client,
+                ClientState {
+                    schema: client_schema.clone(),
+                    node_timeline_id: node_state.timeline_id,
+                    service_name: service_name_str.clone(),
+                },
+            )
+        });
+
+        let _ = SEND_CH.send(
+            RmwEvent::CreateClient {
+                node_timeline_id: node_state.timeline_id,
+                timestamp: now(),
+                service_name: service_name_str,
+                schema_namespace: client_schema.name.clone(),
+                schema_name: client_schema.namespace.clone(),
+            }
+            .into(),
+        );
+    }
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_destroy_client(destroyed_client_addr: usize) {
+    if let Some(client_state) = CLIENTS.load().get(&destroyed_client_addr) {
+        let _ = SEND_CH.send(
+            RmwEvent::DestroyClient {
+                node_timeline_id: client_state.node_timeline_id,
+                timestamp: now(),
+                service_name: client_state.service_name.clone(),
+            }
+            .into(),
+        );
+    }
+
+    CLIENTS.rcu(|clients| clients.remove(&destroyed_client_addr));
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_send_request(
+    client: *const ros::rmw::client,
+    ros_request: *const c_void,
+    sequence_id: i64,
+) {
+    let clients = CLIENTS.load();
+    let Some(client_state) = clients.get(&(client as usize)) else {
+        return;
+    };
+
+    // Why, you may ask, are we using the 'reader_guid' for a thing that is obviously writing? Becuase that's what
+    // fastrtps does, and observed behavior agrees. Couldn't tell you why.
+    let client_guid = rtps_client_reader_guid(client);
+
+    let request_size = client_state.schema.request_members.size;
+    let request_bytes: &[u8] = std::slice::from_raw_parts(ros_request as *const u8, request_size);
+    let kvs = client_state
+        .schema
+        .request_members
+        .interpret_single_message(request_bytes);
+
+    let service_event = ServiceEvent {
+        timeline_id: client_state.node_timeline_id,
+        timestamp: now(),
+        service_name: client_state.service_name.clone(),
+        event_type: ServiceEventType::SendRequest,
+        client_guid,
+        sequence_id,
+        kvs,
+    };
+
+    let _ = SEND_CH.send(RosEvent::ServiceEvent(service_event));
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_take_request(
+    service: ServicePtr,
+    request_header: *const ros::rmw::service_info,
+    ros_request: *const c_void,
+) {
+    let services = SERVICES.load();
+    let Some(service_state) = services.get(&service) else {
+        return;
+    };
+
+    let request_size = service_state.schema.request_members.size;
+    let request_bytes: &[u8] = std::slice::from_raw_parts(ros_request as *const u8, request_size);
+    let kvs = service_state
+        .schema
+        .request_members
+        .interpret_single_message(request_bytes);
+
+    let client_guid_i8: [i8; 16] = (*request_header).request_id.writer_guid;
+    let client_guid: [u8; 16] = std::mem::transmute(client_guid_i8);
+    let sequence_id = (*request_header).request_id.sequence_number;
+
+    let _ = SEND_CH.send(RosEvent::ServiceEvent(ServiceEvent {
+        timeline_id: service_state.node_timeline_id,
+        timestamp: now(),
+        service_name: service_state.service_name.clone(),
+        event_type: ServiceEventType::TakeRequest,
+        client_guid,
+        sequence_id,
+        kvs,
+    }));
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_send_response(
+    service: ServicePtr,
+    request_header: *const ros::rmw::request_id,
+    ros_response: *const c_void,
+) {
+    let services = SERVICES.load();
+    let Some(service_state) = services.get(&service) else {
+        return;
+    };
+
+    let response_size = service_state.schema.request_members.size;
+    let response_bytes: &[u8] =
+        std::slice::from_raw_parts(ros_response as *const u8, response_size);
+    let kvs = service_state
+        .schema
+        .response_members
+        .interpret_single_message(response_bytes);
+
+    let client_guid_i8: [i8; 16] = (*request_header).writer_guid;
+    let client_guid: [u8; 16] = std::mem::transmute(client_guid_i8);
+    let sequence_id = (*request_header).sequence_number;
+
+    let _ = SEND_CH.send(RosEvent::ServiceEvent(ServiceEvent {
+        timeline_id: service_state.node_timeline_id,
+        timestamp: now(),
+        service_name: service_state.service_name.clone(),
+        event_type: ServiceEventType::SendResponse,
+        client_guid,
+        sequence_id,
+        kvs,
+    }));
+}
+
+#[no_mangle]
+unsafe extern "C" fn modality_after_rmw_take_response(
+    client: *const ros::rmw::client,
+    request_header: *const ros::rmw::service_info,
+    ros_response: *const c_void,
+) {
+    let clients = CLIENTS.load();
+    let Some(client_state) = clients.get(&(client as usize)) else {
+        return;
+    };
+
+    let client_guid = rtps_client_reader_guid(client);
+    let sequence_id = (*request_header).request_id.sequence_number;
+
+    let response_size = client_state.schema.response_members.size;
+    let response_bytes: &[u8] =
+        std::slice::from_raw_parts(ros_response as *const u8, response_size);
+    let kvs = client_state
+        .schema
+        .response_members
+        .interpret_single_message(response_bytes);
+
+    let service_event = ServiceEvent {
+        timeline_id: client_state.node_timeline_id,
+        timestamp: now(),
+        service_name: client_state.service_name.clone(),
+        event_type: ServiceEventType::TakeResponse,
+        client_guid,
+        sequence_id,
+        kvs,
+    };
+
+    let _ = SEND_CH.send(RosEvent::ServiceEvent(service_event));
+}
+
+// We need to dig into the fast-rtps (fastdds) internal state to pull out the client id, since it's not exposed via the RMW apis.
+unsafe fn rtps_client_reader_guid(client: *const ros::rmw::client) -> [u8; 16] {
+    let fastrtps_custom_client_info = (*client).data as *const ros::fastrtps::CustomClientInfo;
+    let reader_guid = &(*fastrtps_custom_client_info).reader_guid_;
+
+    // fastrtps stores its id as a prefix followed by an entityid, we need to glue thosee together to get the "writer_guid"
+    // value that we  observe on the service side.
+    let mut full_guid = [0u8; 16];
+    full_guid[0..=11].copy_from_slice(&reader_guid.guidPrefix.value);
+    full_guid[12..16].copy_from_slice(&reader_guid.entityId.value);
+    full_guid
+}
