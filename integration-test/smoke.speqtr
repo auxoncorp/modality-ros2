@@ -1,0 +1,48 @@
+behavior "pubsub: talker and listener exist"
+  nominal case "events were logged on the talker and listener timelines"
+    *@talker AND *@listener
+  end
+end
+
+behavior "pubsub: publisher and subscription are created"
+  nominal case "rmw events were logged"
+    rmw.create_publisher@talker(_.ros.topic = "/chatter") AND
+    rmw.create_subscription@listener(_.ros.topic = "/chatter")
+  end
+end
+
+behavior "pubsub: interactions are connected"
+  when "chatter is published"
+    chatter@talker as pub
+  end
+  
+  nominal case "chatter is received"
+    pub -> chatter@listener as sub
+    AND sub.interaction.remote_event.timestamp = pub.timestamp
+  end
+end
+
+behavior "service: server and client exist"
+  nominal case "events were logged on the server and client timelines"
+    *@add_two_ints_server AND *@add_two_ints_client
+  end
+end
+
+behavior "service: request interaction is connected"
+  when "add is requested"
+    add_two_ints@add_two_ints_client(_.ros.service.event="send_request") as send_req
+  end
+
+  nominal case "add is received, peformed, and returned"
+    send_req ->
+    add_two_ints@add_two_ints_server(
+      _.ros.service.event="recv_request" AND
+      _.interaction.remote_event.ros.service.sequence_id = send_req.ros.service.sequence_id)
+    -> add_two_ints@add_two_ints_server(
+      _.ros.service.event="send_response" AND
+      _.interaction.remote_event.ros.service.sequence_id = send_req.ros.service.sequence_id)
+    -> add_two_ints@add_two_ints_client(
+      _.ros.service.event="recv_response" AND
+      _.ros.service.sequence_id = send_req.ros.service.sequence_id)
+  end
+end

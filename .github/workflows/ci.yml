@@ -10,3 +10,8 @@ jobs:
 
       - name: Docker build
         run: ./build-in-docker.sh
+
+      - name: Integration test
+        run: |
+          cd integration-test
+          ./go.sh
