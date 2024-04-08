@@ -71,7 +71,7 @@ These environment variables configure the behavior of the ROS LD_PRELOAD library
    connecting to Modality. If this is not set, the auth token used by
    the Modality CLI is read from `~/.config/modality_cli/.user_auth_token`.
 
-* `MODALITY_HOST`: The hostname where the modality servier is running.
+* `MODALITY_HOST`: The hostname where the modality server is running.
 
 This uses the same connection and configuration infrastructure as
 reflector plugins; see the [`modality-reflector` Configuration File documentation](https://docs.auxon.io/modality/ingest/modality-reflector-configuration-file.html)
