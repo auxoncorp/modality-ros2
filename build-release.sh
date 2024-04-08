@@ -10,7 +10,8 @@ set -e
 
 mkdir -p target/release
 
-gcc -Wall -fPIC -shared \
+gcc -Wall -Wextra -Wbad-function-cast -Wmissing-declarations -Wmissing-include-dirs -Wmissing-prototypes -Wshadow \
+    -fPIC -shared \
     -Os \
     -o target/release/libmodality_ros_hook.so \
     ld_preload_shim.c \
