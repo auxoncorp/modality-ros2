@@ -150,23 +150,23 @@ typedef rmw_ret_t (*rmw_take_response_t)(const rmw_client_t *client,
 /* initialized on demand.                                   */
 /************************************************************/
 
-rmw_create_node_t real_rmw_create_node;
-rmw_destroy_node_t real_rmw_destroy_node;
-rmw_create_publisher_t real_rmw_create_publisher;
-rmw_destroy_publisher_t real_rmw_destroy_publisher;
-rmw_publish_t real_rmw_publish;
-clock_gettime_t real_clock_gettime;
-rmw_create_subscription_t real_rmw_create_subscription;
-rmw_destroy_subscription_t real_rmw_destroy_subscription;
-rmw_take_with_info_t real_rmw_take_with_info;
-rmw_create_service_t real_rmw_create_service;
-rmw_destroy_service_t real_rmw_destroy_service;
-rmw_create_client_t real_rmw_create_client;
-rmw_destroy_client_t real_rmw_destroy_client;
-rmw_send_request_t real_rmw_send_request;
-rmw_take_request_t real_rmw_take_request;
-rmw_send_response_t real_rmw_send_response;
-rmw_take_response_t real_rmw_take_response;
+static rmw_create_node_t real_rmw_create_node;
+static rmw_destroy_node_t real_rmw_destroy_node;
+static rmw_create_publisher_t real_rmw_create_publisher;
+static rmw_destroy_publisher_t real_rmw_destroy_publisher;
+static rmw_publish_t real_rmw_publish;
+static clock_gettime_t real_clock_gettime;
+static rmw_create_subscription_t real_rmw_create_subscription;
+static rmw_destroy_subscription_t real_rmw_destroy_subscription;
+static rmw_take_with_info_t real_rmw_take_with_info;
+static rmw_create_service_t real_rmw_create_service;
+static rmw_destroy_service_t real_rmw_destroy_service;
+static rmw_create_client_t real_rmw_create_client;
+static rmw_destroy_client_t real_rmw_destroy_client;
+static rmw_send_request_t real_rmw_send_request;
+static rmw_take_request_t real_rmw_take_request;
+static rmw_send_response_t real_rmw_send_response;
+static rmw_take_response_t real_rmw_take_response;
 
 /***********************/
 /* Hook function impls */
