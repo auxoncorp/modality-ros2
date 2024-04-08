@@ -517,6 +517,7 @@ impl MessageProcessor {
                     AttrVal::String(Cow::Owned(hex::encode(service_event.client_guid))),
                 ));
             }
+
             ServiceEventType::TakeRequest | ServiceEventType::SendResponse => {
                 event_attrs.push((
                     self.interned_attr_key(&format!(
@@ -526,11 +527,13 @@ impl MessageProcessor {
                     .await?,
                     AttrVal::Bool(true),
                 ));
+
                 event_attrs.push((
                     self.interned_attr_key("event.interaction.remote_event.ros.service.event")
                         .await?,
                     AttrVal::String(Cow::Owned(service_event.event_type.opposite().to_string())),
                 ));
+
                 event_attrs.push((
                     self.interned_attr_key(
                         "event.interaction.remote_event.ros.service.sequence_id",
@@ -538,19 +541,13 @@ impl MessageProcessor {
                     .await?,
                     AttrVal::Integer(service_event.sequence_id),
                 ));
+
                 event_attrs.push((
                     self.interned_attr_key(
                         "event.interaction.remote_event.ros.service.client_guid",
                     )
                     .await?,
                     AttrVal::String(Cow::Owned(hex::encode(service_event.client_guid))),
-                ));
-                event_attrs.push((
-                    self.interned_attr_key(
-                        "event.interaction.remote_event.ros.service.sequence_id",
-                    )
-                    .await?,
-                    AttrVal::Integer(service_event.sequence_id),
                 ));
 
                 if matches!(service_event.event_type, ServiceEventType::SendResponse) {
