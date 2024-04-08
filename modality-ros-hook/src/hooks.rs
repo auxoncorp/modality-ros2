@@ -548,6 +548,11 @@ unsafe extern "C" fn modality_after_rmw_destroy_publisher(pub_ptr: PublisherPtr)
 
 #[no_mangle]
 unsafe extern "C" fn modality_before_rmw_publish(pub_ptr: PublisherPtr, message: *const c_void) {
+    // Since this is a 'before' hook, the rmw impl hasn't done a sanity check yet.
+    if pub_ptr == 0 || message.is_null() {
+        return;
+    }
+
     let publishers = PUBLISHERS.load();
     let Some(pub_state) = publishers.get(&pub_ptr) else {
         return;
