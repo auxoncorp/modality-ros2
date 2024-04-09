@@ -317,13 +317,6 @@ impl MessageProcessor {
             ));
         }
 
-        // http://wiki.ros.org/Names claims that names can't have '.' in them
-        let mut normalized_topic_name = captured_message.msg.topic_name.clone();
-        if normalized_topic_name.starts_with('/') {
-            normalized_topic_name.remove(0);
-        }
-        let normalized_topic_name = normalized_topic_name.replace('/', ".");
-
         match captured_message.msg.direction {
             MessageDirection::Send {
                 local_publisher_graph_id,
@@ -340,10 +333,10 @@ impl MessageProcessor {
                     {
                         let attrs = vec![(
                             self.interned_attr_key(&format!(
-                                "timeline.ros.publisher_gid.{normalized_topic_name}"
+                                "timeline.ros.publisher_gid.{local_gid}"
                             ))
                             .await?,
-                            AttrVal::String(Cow::Owned(local_gid.to_string())),
+                            AttrVal::Bool(true),
                         )];
 
                         self.client.timeline_metadata(attrs).await?;
@@ -386,7 +379,7 @@ impl MessageProcessor {
 
                 if let Some(t) = captured_message.publish_time.to_epoch_nanos() {
                     event_attrs.push((
-                        self.interned_attr_key("event.interaction.remote_event.timestamp")
+                        self.interned_attr_key("event.interaction.remote_timestamp")
                             .await?,
                         AttrVal::Timestamp(t),
                     ));
@@ -394,11 +387,11 @@ impl MessageProcessor {
 
                 if let Some(gid) = remote_publisher_graph_id {
                     event_attrs.push((
-                        self.interned_attr_key(
-                            &format!("event.interaction.remote_timeline.ros.publisher_gid.{normalized_topic_name}")
-                        )
+                        self.interned_attr_key(&format!(
+                            "event.interaction.remote_timeline.ros.publisher_gid.{gid}"
+                        ))
                         .await?,
-                        AttrVal::String(Cow::Owned(gid.to_string())),
+                        AttrVal::Bool(true),
                     ));
                 }
 
@@ -507,12 +500,12 @@ impl MessageProcessor {
         match service_event.event_type {
             ServiceEventType::SendRequest | ServiceEventType::TakeResponse => {
                 event_attrs.push((
-                    self.interned_attr_key("event.ros.service.sequence_id")
+                    self.interned_attr_key("event.internal.ros.service.sequence_id")
                         .await?,
                     AttrVal::Integer(service_event.sequence_id),
                 ));
                 event_attrs.push((
-                    self.interned_attr_key("event.ros.service.client_guid")
+                    self.interned_attr_key("event.internal.ros.service.client_guid")
                         .await?,
                     AttrVal::String(Cow::Owned(hex::encode(service_event.client_guid))),
                 ));
@@ -536,7 +529,7 @@ impl MessageProcessor {
 
                 event_attrs.push((
                     self.interned_attr_key(
-                        "event.interaction.remote_event.ros.service.sequence_id",
+                        "event.interaction.remote_event.internal.ros.service.sequence_id",
                     )
                     .await?,
                     AttrVal::Integer(service_event.sequence_id),
@@ -544,7 +537,7 @@ impl MessageProcessor {
 
                 event_attrs.push((
                     self.interned_attr_key(
-                        "event.interaction.remote_event.ros.service.client_guid",
+                        "event.interaction.remote_event.internal.ros.service.client_guid",
                     )
                     .await?,
                     AttrVal::String(Cow::Owned(hex::encode(service_event.client_guid))),
@@ -601,6 +594,10 @@ impl MessageProcessor {
             }
 
             let tl_attrs = vec![
+                (
+                    self.interned_attr_key("timeline.run_id").await?,
+                    AttrVal::String(Cow::Borrowed(&CONFIG.run_id)),
+                ),
                 (
                     self.interned_attr_key("timeline.name").await?,
                     AttrVal::String(Cow::Owned(timeline_name)),
