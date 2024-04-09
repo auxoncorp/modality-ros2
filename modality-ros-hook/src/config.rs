@@ -1,3 +1,4 @@
+use auxon_sdk::api::Uuid;
 use fxhash::FxHashSet;
 use lazy_static::lazy_static;
 use std::time::Duration;
@@ -10,6 +11,7 @@ pub struct ModalityRosHookConfig {
     pub connect_timeout: Duration,
     pub ignored_topics: FxHashSet<String>,
     pub max_array_len: usize,
+    pub run_id: String,
 }
 
 impl ModalityRosHookConfig {
@@ -37,10 +39,16 @@ impl ModalityRosHookConfig {
             }
         }
 
+        let mut run_id = Uuid::new_v4().to_string();
+        if let Ok(s) = std::env::var("MODALITY_RUN_ID") {
+            run_id = s;
+        }
+
         ModalityRosHookConfig {
             max_array_len,
             ignored_topics,
             connect_timeout,
+            run_id,
         }
     }
 }
