@@ -54,25 +54,36 @@ These environment variables configure the behavior of the ROS LD_PRELOAD library
   messages are queued in memory. Defaults to 20 seconds.
 
 * `MODALITY_ROS_IGNORED_TOPICS`: A comma-separated list of ROS topics
-   which should be completely ignored when relaying data to
-   Modality. Be sure to include the '/' at the beginning of the
-   topic. Defaults to "/parameter_events". If you want to explicitly
-   include ALL topics (with no default ignores), set this to the empty
-   string `""`.
+  which should be completely ignored when relaying data to
+  Modality. Be sure to include the '/' at the beginning of the
+  topic. Defaults to "/parameter_events". If you want to explicitly
+  include ALL topics (with no default ignores), set this to the empty
+  string `""`.
 
 * `MODALITY_ROS_MAX_ARRAY_LEN`: When transcribing ROS messages into
-   Modality format, what is the largest array that should be allowed?
-   Any array longer than this will be ignored. This is meant to allow
-   things like vectors and coordinates to be passed into Modality,
-   while excluding things like camera frames and LIDAR point
-   clouds. Defaults to 12.
+  Modality format, what is the largest array that should be allowed?
+  Any array longer than this will be ignored. This is meant to allow
+  things like vectors and coordinates to be passed into Modality,
+  while excluding things like camera frames and LIDAR point
+  clouds. Defaults to 12.
+
+* `MODALITY_ROS_BUFFER_SIZE`: How many messages to buffer internally,
+  before sending to the Modality backend. If this is too small, some
+  message may be dropped (an error message will be printed). Defaults
+  to 1024.
+
+* `MODALITY_RUN_ID`: The run id to value to use in timeline metadata
+  (`timeline.run_id`). This is used as the basis for the segmentation
+  method used in the default Modality workspace.  Defaults to a
+  randomly generated uuid.
 
 * `MODALITY_AUTH_TOKEN`: The content of the auth token to use when
-   connecting to Modality. If this is not set, the auth token used by
-   the Modality CLI is read from `~/.config/modality_cli/.user_auth_token`.
+  connecting to Modality. If this is not set, the auth token used by
+  the Modality CLI is read from
+  `~/.config/modality_cli/.user_auth_token`.
 
 * `MODALITY_HOST`: The hostname where the modality server is running.
 
-This uses the same connection and configuration infrastructure as
+This library uses the same connection and configuration infrastructure as
 reflector plugins; see the [`modality-reflector` Configuration File documentation](https://docs.auxon.io/modality/ingest/modality-reflector-configuration-file.html)
 for more information.

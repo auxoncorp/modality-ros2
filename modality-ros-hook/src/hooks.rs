@@ -6,10 +6,12 @@ use arc_swap::ArcSwap;
 use archery::ArcK;
 use auxon_sdk::api::{AttrVal, Nanoseconds, TimelineId};
 use lazy_static::lazy_static;
+use tokio::sync::mpsc::error::TrySendError;
 
 use std::{
     cell::RefCell,
     ffi::{c_char, c_long, c_void, CStr},
+    sync::atomic::AtomicBool,
 };
 
 thread_local! {
@@ -18,6 +20,8 @@ thread_local! {
     /// it on SEND_CH for processing.
     pub static LAST_CAPTURED_MESSAGE: RefCell<Option<Vec<CapturedMessage>>> = const { RefCell::new(None) }
 }
+
+const PRINTED_ERROR: AtomicBool = AtomicBool::new(false);
 
 lazy_static! {
     static ref NODES: ArcSwap<rpds::HashTrieMap<NodePtr, NodeState, ArcK>> = Default::default();
@@ -29,10 +33,19 @@ lazy_static! {
         Default::default();
     static ref CLIENTS: ArcSwap<rpds::HashTrieMap<ClientPtr, ClientState, ArcK>> =
         Default::default();
-    static ref SEND_CH: tokio::sync::mpsc::UnboundedSender<RosEvent> = {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    static ref SEND_CH: Sender = Sender::new();
+}
 
-        std::thread::spawn(|| {
+struct Sender {
+    #[allow(unused)]
+    worker_join_handle: std::thread::JoinHandle<()>,
+    tx: tokio::sync::mpsc::Sender<RosEvent>,
+}
+
+impl Sender {
+    fn new() -> Self {
+        let (tx, rx) = tokio::sync::mpsc::channel(CONFIG.buffer_size);
+        let worker_join_handle = std::thread::spawn(|| {
             let rt = match tokio::runtime::Builder::new_current_thread()
                 .enable_io()
                 .enable_time()
@@ -40,7 +53,7 @@ lazy_static! {
             {
                 Ok(rt) => rt,
                 Err(e) => {
-                    eprintln!("Failed to initialize Modality probe tokio runtime: {e:?}");
+                    eprintln!("MODALITY: Failed to initialize tokio runtime: {e:?}");
                     return;
                 }
             };
@@ -49,14 +62,34 @@ lazy_static! {
                 match MessageProcessor::new().await {
                     Ok(processor) => processor.message_loop(rx).await,
                     Err(e) => {
-                        eprintln!("Failed to initialize Modality probe message processor: {e:?}");
+                        eprintln!("MODALITY: Failed to initialize message processor: {e:?}");
                     }
                 }
+                eprintln!(
+                    "MODALITY: Message send thread has terminated; no more message will be sent."
+                );
             });
         });
 
-        tx
-    };
+        Sender {
+            worker_join_handle,
+            tx,
+        }
+    }
+
+    pub fn send(&self, event: RosEvent) {
+        match self.tx.try_send(event) {
+            Ok(()) => (),
+            Err(TrySendError::Full(_)) => {
+                if !PRINTED_ERROR.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("MODALITY: Internal message buffer has reached capacity ({}); some messages will be dropped.", CONFIG.buffer_size);
+                    eprintln!("MODALITY: The MODALITY_ROS_BUFFER_SIZE env var can be set to increase the buffer size.");
+                    PRINTED_ERROR.store(true, std::sync::atomic::Ordering::Relaxed)
+                }
+            }
+            Err(TrySendError::Closed(_)) => (),
+        }
+    }
 }
 
 type NodePtr = usize;

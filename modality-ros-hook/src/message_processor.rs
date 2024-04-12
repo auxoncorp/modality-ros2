@@ -36,7 +36,7 @@ impl MessageProcessor {
         })
     }
 
-    pub async fn message_loop(mut self, mut rx: tokio::sync::mpsc::UnboundedReceiver<RosEvent>) {
+    pub async fn message_loop(mut self, mut rx: tokio::sync::mpsc::Receiver<RosEvent>) {
         while let Some(event) = rx.recv().await {
             match event {
                 RosEvent::Message(captured_message) => {
