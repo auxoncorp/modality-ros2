@@ -8,10 +8,18 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: Auth to GHCR
+        env:
+          AUXON_GHCR_TOKEN_RO: ${{ secrets.AUXON_GHCR_TOKEN_RO }}
+        run: |
+          echo $AUXON_GHCR_TOKEN_RO | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+
       - name: Docker build
         run: ./build-in-docker.sh
 
       - name: Integration test
+        env:
+          MODALITY_LICENSE_KEY: ${{ secrets.MODALITY_LICENSE_KEY }}
         run: |
           cd integration-test
           ./go.sh

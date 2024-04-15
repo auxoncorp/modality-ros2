@@ -18,7 +18,7 @@ behavior "pubsub: interactions are connected"
   
   nominal case "chatter is received"
     pub -> chatter@listener as sub
-    AND sub.interaction.remote_event.timestamp = pub.timestamp
+    AND sub.interaction.remote_timestamp = pub.timestamp
   end
 end
 
@@ -37,12 +37,12 @@ behavior "service: request interaction is connected"
     send_req ->
     add_two_ints@add_two_ints_server(
       _.ros.service.event="recv_request" AND
-      _.interaction.remote_event.ros.service.sequence_id = send_req.ros.service.sequence_id)
+      _.interaction.remote_event.internal.ros.service.sequence_id = send_req.internal.ros.service.sequence_id)
     -> add_two_ints@add_two_ints_server(
       _.ros.service.event="send_response" AND
-      _.interaction.remote_event.ros.service.sequence_id = send_req.ros.service.sequence_id)
+      _.interaction.remote_event.internal.ros.service.sequence_id = send_req.internal.ros.service.sequence_id)
     -> add_two_ints@add_two_ints_client(
       _.ros.service.event="recv_response" AND
-      _.ros.service.sequence_id = send_req.ros.service.sequence_id)
+      _.internal.ros.service.sequence_id = send_req.internal.ros.service.sequence_id)
   end
 end
