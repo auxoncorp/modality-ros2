@@ -21,7 +21,7 @@ thread_local! {
     pub static LAST_CAPTURED_MESSAGE: RefCell<Option<Vec<CapturedMessage>>> = const { RefCell::new(None) }
 }
 
-const PRINTED_ERROR: AtomicBool = AtomicBool::new(false);
+static PRINTED_ERROR: AtomicBool = AtomicBool::new(false);
 
 lazy_static! {
     static ref NODES: ArcSwap<rpds::HashTrieMap<NodePtr, NodeState, ArcK>> = Default::default();
@@ -497,13 +497,13 @@ unsafe extern "C" fn modality_after_rmw_create_node(
         )
     });
 
-    let _ = SEND_CH.send(RmwEvent::create_node(node_namespace, node_name, node_timeline_id).into());
+    SEND_CH.send(RmwEvent::create_node(node_namespace, node_name, node_timeline_id).into());
 }
 
 #[no_mangle]
 unsafe extern "C" fn modality_after_rmw_destroy_node(node_ptr: NodePtr) {
     if let Some(node_state) = NODES.load().get(&node_ptr) {
-        let _ = SEND_CH.send(RmwEvent::destroy_node(node_state.timeline_id).into());
+        SEND_CH.send(RmwEvent::destroy_node(node_state.timeline_id).into());
     }
 
     NODES.rcu(|nodes| nodes.remove(&node_ptr));
@@ -554,7 +554,7 @@ unsafe extern "C" fn modality_after_rmw_create_publisher(
             )
         });
 
-        let _ = SEND_CH.send(
+        SEND_CH.send(
             RmwEvent::create_publisher(
                 node_state.timeline_id,
                 graph_id,
@@ -571,7 +571,7 @@ unsafe extern "C" fn modality_after_rmw_create_publisher(
 #[no_mangle]
 unsafe extern "C" fn modality_after_rmw_destroy_publisher(pub_ptr: PublisherPtr) {
     if let Some(pub_state) = PUBLISHERS.load().get(&pub_ptr) {
-        let _ = SEND_CH.send(
+        SEND_CH.send(
             RmwEvent::destroy_publisher(pub_state.node_timeline_id, pub_state.graph_id).into(),
         );
     }
@@ -659,7 +659,7 @@ unsafe extern "C" fn modality_after_clock_gettime(clock_id: usize, timespec: *co
                     // fail if the rx thread is dead, but in that case
                     // a message has already been printed, and this
                     // would just be belaboring the point, repeatedly.
-                    let _ = SEND_CH.send(msg_with_time.into());
+                    SEND_CH.send(msg_with_time.into());
                 }
             }
         })
@@ -703,7 +703,7 @@ unsafe extern "C" fn modality_after_rmw_create_subscription(
         )
     });
 
-    let _ = SEND_CH.send(
+    SEND_CH.send(
         RmwEvent::create_subscription(
             node_state.timeline_id,
             topic_name_str,
@@ -717,7 +717,7 @@ unsafe extern "C" fn modality_after_rmw_create_subscription(
 #[no_mangle]
 unsafe extern "C" fn modality_after_rmw_destroy_subscription(sub_ptr: SubscriptionPtr) {
     if let Some(sub_state) = SUBSCRIPTIONS.load().get(&sub_ptr) {
-        let _ = SEND_CH.send(
+        SEND_CH.send(
             RmwEvent::destroy_subscription(
                 sub_state.node_timeline_id,
                 sub_state.topic_name.clone(),
@@ -776,7 +776,7 @@ unsafe extern "C" fn modality_after_rmw_take_with_info(
         // the rx thread is dead, but in that case a message
         // has already been printed, and this would just be
         // belaboring the point, repeatedly.
-        let _ = SEND_CH.send(msg.into());
+        SEND_CH.send(msg.into());
     }
 }
 
@@ -809,7 +809,7 @@ unsafe extern "C" fn modality_after_rmw_create_service(
             )
         });
 
-        let _ = SEND_CH.send(
+        SEND_CH.send(
             RmwEvent::CreateService {
                 node_timeline_id: node_state.timeline_id,
                 timestamp: now(),
@@ -825,7 +825,7 @@ unsafe extern "C" fn modality_after_rmw_create_service(
 #[no_mangle]
 unsafe extern "C" fn modality_after_rmw_destroy_service(destroyed_service_addr: usize) {
     if let Some(service_state) = SERVICES.load().get(&destroyed_service_addr) {
-        let _ = SEND_CH.send(
+        SEND_CH.send(
             RmwEvent::DestroyService {
                 node_timeline_id: service_state.node_timeline_id,
                 timestamp: now(),
@@ -867,7 +867,7 @@ unsafe extern "C" fn modality_after_rmw_create_client(
             )
         });
 
-        let _ = SEND_CH.send(
+        SEND_CH.send(
             RmwEvent::CreateClient {
                 node_timeline_id: node_state.timeline_id,
                 timestamp: now(),
@@ -883,7 +883,7 @@ unsafe extern "C" fn modality_after_rmw_create_client(
 #[no_mangle]
 unsafe extern "C" fn modality_after_rmw_destroy_client(destroyed_client_addr: usize) {
     if let Some(client_state) = CLIENTS.load().get(&destroyed_client_addr) {
-        let _ = SEND_CH.send(
+        SEND_CH.send(
             RmwEvent::DestroyClient {
                 node_timeline_id: client_state.node_timeline_id,
                 timestamp: now(),
@@ -928,7 +928,7 @@ unsafe extern "C" fn modality_after_rmw_send_request(
         kvs,
     };
 
-    let _ = SEND_CH.send(RosEvent::ServiceEvent(service_event));
+    SEND_CH.send(RosEvent::ServiceEvent(service_event));
 }
 
 #[no_mangle]
@@ -953,7 +953,7 @@ unsafe extern "C" fn modality_after_rmw_take_request(
     let client_guid: [u8; 16] = std::mem::transmute(client_guid_i8);
     let sequence_id = (*request_header).request_id.sequence_number;
 
-    let _ = SEND_CH.send(RosEvent::ServiceEvent(ServiceEvent {
+    SEND_CH.send(RosEvent::ServiceEvent(ServiceEvent {
         timeline_id: service_state.node_timeline_id,
         timestamp: now(),
         service_name: service_state.service_name.clone(),
@@ -987,7 +987,7 @@ unsafe extern "C" fn modality_after_rmw_send_response(
     let client_guid: [u8; 16] = std::mem::transmute(client_guid_i8);
     let sequence_id = (*request_header).sequence_number;
 
-    let _ = SEND_CH.send(RosEvent::ServiceEvent(ServiceEvent {
+    SEND_CH.send(RosEvent::ServiceEvent(ServiceEvent {
         timeline_id: service_state.node_timeline_id,
         timestamp: now(),
         service_name: service_state.service_name.clone(),
@@ -1030,7 +1030,7 @@ unsafe extern "C" fn modality_after_rmw_take_response(
         kvs,
     };
 
-    let _ = SEND_CH.send(RosEvent::ServiceEvent(service_event));
+    SEND_CH.send(RosEvent::ServiceEvent(service_event));
 }
 
 // We need to dig into the fast-rtps (fastdds) internal state to pull out the client id, since it's not exposed via the RMW apis.
