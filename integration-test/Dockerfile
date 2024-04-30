@@ -1,4 +1,4 @@
-FROM modality-ros2-build
+FROM modality-ros2-build:amd64
 
 FROM ros:humble
 RUN apt update

@@ -51,6 +51,9 @@ jobs:
           echo "Release tag: $RELEASE_TAG"
           echo "Release version: $RELEASE_VERSION"
 
+      - name: Install system packages
+        run: sudo apt-get install -y qemu-user-static binfmt-support
+
       - uses: actions/checkout@v3
 
       - name: Release build
