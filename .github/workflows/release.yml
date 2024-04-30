@@ -52,13 +52,14 @@ jobs:
           echo "Release version: $RELEASE_VERSION"
 
       - uses: actions/checkout@v3
-      - uses: moonrepo/setup-rust@v0
 
       - name: Release build
         run: |
           ./build-in-docker.sh
-          cp target/docker-release/libmodality_ros_hook.so libmodality_ros_hook_22.04_amd64.so
-          cp target/docker-release/ros_deps ros_deps_22.04_amd64
+          cp target/docker-release/amd64/libmodality_ros_hook.so libmodality_ros_hook_22.04_amd64.so
+          cp target/docker-release/amd64/ros_deps ros_deps_22.04_amd64
+          cp target/docker-release/arm64/libmodality_ros_hook.so libmodality_ros_hook_22.04_arm64.so
+          cp target/docker-release/arm64/ros_deps ros_deps_22.04_arm64
 
       - name: Create github release
         id: create_release
@@ -72,3 +73,5 @@ jobs:
           files: |
             libmodality_ros_hook_22.04_amd64.so
             ros_deps_22.04_amd64
+            libmodality_ros_hook_22.04_arm64.so
+            ros_deps_22.04_arm64

@@ -2,9 +2,11 @@ set -e
 
 (
     cd modality-ros-hook
-    cargo clippy --all-features -- -W clippy::all -D warnings
-    cargo fmt --all -- --check
-    cargo test --all-features -- --test-threads=1
+    if [ "$TARGETPLATFORM" = "linux/amd64" ]; then
+        cargo clippy --all-features -- -W clippy::all -D warnings
+        cargo fmt --all -- --check
+        cargo test --all-features -- --test-threads=1
+    fi
     cargo build --profile=release-with-debug
 )
 
