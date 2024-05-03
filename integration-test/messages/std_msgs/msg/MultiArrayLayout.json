@@ -1,0 +1,4 @@
+{
+    dim: [{label: "Dimension", size: 4, stride: 1}],
+    data_offset: 0,
+}

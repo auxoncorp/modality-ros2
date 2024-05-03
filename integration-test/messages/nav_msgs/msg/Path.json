@@ -1,0 +1,29 @@
+{
+    header: {
+        stamp: { sec: 42, nanosec: 43 },
+        frame_id: "test"
+    },
+    poses: [
+        {
+            header: {
+                stamp: { sec: 42, nanosec: 43 },
+                frame_id: "test"
+            },
+            pose: {
+                position: { x: 1.0, y: 2.0, z: 3.0 },
+                orientation: { x: 4.0, y: 5.0, z: 6.0, w: 7.0 }
+            }
+        },
+        {
+            header: {
+                stamp: { sec: 142, nanosec: 143 },
+                frame_id: "test2"
+            },
+            pose: {
+                position: { x: 10.0, y: 20.0, z: 30.0 },
+                orientation: { x: 40.0, y: 50.0, z: 60.0, w: 70.0 }
+            }
+        },
+        
+    ]
+}

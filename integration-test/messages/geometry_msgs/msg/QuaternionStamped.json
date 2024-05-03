@@ -1,0 +1,12 @@
+{
+    header: {
+        stamp: { sec: 42, nanosec: 43 },
+        frame_id: "test"
+    },
+    quaternion: {
+        x: 1.0,
+        y: 2.0,
+        z: 3.0,
+        w: 4.0,
+    }
+}

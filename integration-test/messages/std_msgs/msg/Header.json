@@ -1,0 +1,4 @@
+{
+    stamp: { sec: 42, nanosec: 43 },
+    frame_id: "test"
+}

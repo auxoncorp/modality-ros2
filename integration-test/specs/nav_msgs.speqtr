@@ -1,0 +1,115 @@
+behavior "GridCells"
+  nominal case "Message Occcured"
+    nav_msgs/msg/GridCells@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.cell_width = 1.0
+    and e.cell_height = 2.0
+    and e.cells.0.x = 1.0
+    and e.cells.0.y = 2.0
+    and e.cells.0.z = 3.0
+    and e.cells.1.x = 4.0
+    and e.cells.1.y = 5.0
+    and e.cells.1.z = 6.0
+  end
+end
+
+behavior "MapMetaData"
+  nominal case "Message Occcured"
+    nav_msgs/msg/MapMetaData@_ros2cli_* as e
+    and e.map_load_time.sec = 42
+    and e.map_load_time.nanosec = 43
+    and e.resolution = 1.0
+    and e.width = 2 
+    and e.height = 3
+    and e.origin.position.x = 1.0
+    and e.origin.position.y = 2.0
+    and e.origin.position.z = 3.0
+    and e.origin.orientation.x = 4.0
+    and e.origin.orientation.y = 5.0
+    and e.origin.orientation.z = 6.0
+    and e.origin.orientation.w = 7.0
+  end
+end
+
+behavior "OccupancyGrid"
+  nominal case "Message Occcured"
+    nav_msgs/msg/OccupancyGrid@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.info.map_load_time.sec = 42
+    and e.info.map_load_time.nanosec = 43
+    and e.info.resolution = 1.0
+    and e.info.width = 2 
+    and e.info.height = 3
+    and e.info.origin.position.x = 1.0
+    and e.info.origin.position.y = 2.0
+    and e.info.origin.position.z = 3.0
+    and e.info.origin.orientation.x = 4.0
+    and e.info.origin.orientation.y = 5.0
+    and e.info.origin.orientation.z = 6.0
+    and e.info.origin.orientation.w = 7.0
+    and e.data.0 = 1
+    and e.data.1 = 2
+    and e.data.2 = 3
+    and e.data.3 = 4
+  end
+end
+
+behavior "Odometry"
+  nominal case "Message Occcured"
+    nav_msgs/msg/Odometry@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.child_frame_id = "frame"
+    and e.pose.pose.position.x = 1.0
+    and e.pose.pose.position.y = 2.0
+    and e.pose.pose.position.z = 3.0
+    and e.pose.pose.orientation.x = 4.0
+    and e.pose.pose.orientation.y = 5.0
+    and e.pose.pose.orientation.z = 6.0
+    and e.pose.pose.orientation.w = 7.0
+    and not exists(e.pose.pose.covariance.0)
+    and e.twist.twist.linear.x = 1.0
+    and e.twist.twist.linear.y = 2.0
+    and e.twist.twist.linear.z = 3.0
+    and e.twist.twist.angular.x = 4.0
+    and e.twist.twist.angular.y = 5.0
+    and e.twist.twist.angular.z = 6.0
+    and not exists(e.twist.covariance.0)
+  end
+end
+
+behavior "Path"
+  nominal case "Message Occcured"
+    nav_msgs/msg/Path@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+
+    and e.poses.0.header.stamp.sec = 42
+    and e.poses.0.header.stamp.nanosec = 43
+    and e.poses.0.header.frame_id = "test"
+    and e.poses.0.pose.position.x = 1.0
+    and e.poses.0.pose.position.y = 2.0
+    and e.poses.0.pose.position.z = 3.0
+    and e.poses.0.pose.orientation.x = 4.0
+    and e.poses.0.pose.orientation.y = 5.0
+    and e.poses.0.pose.orientation.z = 6.0
+    and e.poses.0.pose.orientation.w = 7.0
+
+    and e.poses.1.header.stamp.sec = 142
+    and e.poses.1.header.stamp.nanosec = 143
+    and e.poses.1.header.frame_id = "test2"
+    and e.poses.1.pose.position.x = 10.0
+    and e.poses.1.pose.position.y = 20.0
+    and e.poses.1.pose.position.z = 30.0
+    and e.poses.1.pose.orientation.x = 40.0
+    and e.poses.1.pose.orientation.y = 50.0
+    and e.poses.1.pose.orientation.z = 60.0
+    and e.poses.1.pose.orientation.w = 70.0
+  end
+end

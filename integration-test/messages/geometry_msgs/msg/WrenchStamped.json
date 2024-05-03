@@ -1,0 +1,10 @@
+{
+    header: {
+        stamp: { sec: 42, nanosec: 43 },
+        frame_id: "test"
+    },
+    wrench: {
+        force: { x: 1.0, y: 2.0, z: 3.0 },
+        torque: { x: 4.0, y: 5.0, z: 6.0 }
+    }
+}

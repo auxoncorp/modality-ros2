@@ -1,0 +1,11 @@
+{
+    header: {
+        stamp: { sec: 42, nanosec: 43 },
+        frame_id: "test"
+    },
+    point: {
+        x: 1.0,
+        y: 2.0,
+        z: 3.0
+    }
+}

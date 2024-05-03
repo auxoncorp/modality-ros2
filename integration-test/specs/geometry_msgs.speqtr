@@ -1,0 +1,400 @@
+behavior "Accel"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Accel@_ros2cli_* as e
+    and e.linear.x = 1.0
+    and e.linear.y = 2.0
+    and e.linear.z = 3.0
+    and e.angular.x = 4.0
+    and e.angular.y = 5.0
+    and e.angular.z = 6.0
+  end
+end
+
+behavior "AccelStamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/AccelStamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.accel.linear.x = 1.0
+    and e.accel.linear.y = 2.0
+    and e.accel.linear.z = 3.0
+    and e.accel.angular.x = 4.0
+    and e.accel.angular.y = 5.0
+    and e.accel.angular.z = 6.0
+  end
+end
+
+behavior "AccelWithCovariance"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/AccelWithCovariance@_ros2cli_* as e
+    and e.accel.linear.x = 1.0
+    and e.accel.linear.y = 2.0
+    and e.accel.linear.z = 3.0
+    and e.accel.angular.x = 4.0
+    and e.accel.angular.y = 5.0
+    and e.accel.angular.z = 6.0
+    and not exists(e.covariance.0)
+  end
+end
+
+behavior "AccelWithCovarianceStamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/AccelWithCovarianceStamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.accel.accel.linear.x = 1.0
+    and e.accel.accel.linear.y = 2.0
+    and e.accel.accel.linear.z = 3.0
+    and e.accel.accel.angular.x = 4.0
+    and e.accel.accel.angular.y = 5.0
+    and e.accel.accel.angular.z = 6.0
+    and not exists(e.accel.covariance.0)
+  end
+end
+
+behavior "Inertia"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Inertia@_ros2cli_* as e
+    and e.m = 1.0
+    and e.com.x = 2.0 
+    and e.com.y = 3.0 
+    and e.com.z = 4.0 
+    and e.ixx = 5.0
+    and e.ixy = 6.0
+    and e.ixz = 7.0
+    and e.iyy = 8.0
+    and e.iyz = 9.0
+    and e.izz = 10.0
+  end
+end
+
+behavior "InertiaStamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/InertiaStamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.inertia.m = 1.0
+    and e.inertia.com.x = 2.0 
+    and e.inertia.com.y = 3.0 
+    and e.inertia.com.z = 4.0 
+    and e.inertia.ixx = 5.0
+    and e.inertia.ixy = 6.0
+    and e.inertia.ixz = 7.0
+    and e.inertia.iyy = 8.0
+    and e.inertia.iyz = 9.0
+    and e.inertia.izz = 10.0
+  end
+end
+
+behavior "Point32"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Point32@_ros2cli_* as e
+    and e.x = 1.0
+    and e.y = 2.0
+    and e.z = 3.0
+  end
+end
+
+behavior "Point"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Point@_ros2cli_* as e
+    and e.x = 1.0
+    and e.y = 2.0
+    and e.z = 3.0
+  end
+end
+
+behavior "PointStamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/PointStamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.point.x = 1.0
+    and e.point.y = 2.0
+    and e.point.z = 3.0
+  end
+end
+
+behavior "Polygon"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Polygon@_ros2cli_* as e
+    and e.points.0.x = 1.0
+    and e.points.0.y = 2.0
+    and e.points.0.z = 3.0
+    and e.points.1.x = 4.0
+    and e.points.1.y = 5.0
+    and e.points.1.z = 6.0
+    and e.points.2.x = 7.0
+    and e.points.2.y = 8.0
+    and e.points.2.z = 9.0
+  end
+end
+
+
+behavior "PolygonStamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/PolygonStamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.polygon.points.0.x = 1.0
+    and e.polygon.points.0.y = 2.0
+    and e.polygon.points.0.z = 3.0
+    and e.polygon.points.1.x = 4.0
+    and e.polygon.points.1.y = 5.0
+    and e.polygon.points.1.z = 6.0
+    and e.polygon.points.2.x = 7.0
+    and e.polygon.points.2.y = 8.0
+    and e.polygon.points.2.z = 9.0
+  end
+end
+
+behavior "Pose2D"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Pose2D@_ros2cli_* as e
+    and e.x = 1.0
+    and e.y = 2.0
+    and e.theta = 3.0
+  end
+end
+
+# TODO none of the poses are coming through
+# behavior "PoseArray"
+#   nominal case "Message Occcured"
+#     geometry_msgs/msg/PoseArray@_ros2cli_* as e
+#     and e.poses.0.position.x = 1.0
+#     and e.poses.0.position.y = 2.0
+#     and e.poses.0.position.z = 3.0
+#     and e.poses.0.orientation.x = 4.0
+#     and e.poses.0.orientation.y = 5.0
+#     and e.poses.0.orientation.z = 6.0
+#     and e.poses.0.orientation.w = 7.0
+#     and e.poses.1.position.x = 8.0
+#     and e.poses.1.position.y = 9.0
+#     and e.poses.1.position.z = 10.0
+#     and e.poses.1.orientation.x = 11.0
+#     and e.poses.1.orientation.y = 12.0
+#     and e.poses.1.orientation.z = 13.0
+#     and e.poses.1.orientation.w = 14.0
+#   end
+# end
+
+behavior "Pose"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Pose@_ros2cli_* as e
+    and e.position.x = 1.0
+    and e.position.y = 2.0
+    and e.position.z = 3.0
+    and e.orientation.x = 4.0
+    and e.orientation.y = 5.0
+    and e.orientation.z = 6.0
+    and e.orientation.w = 7.0
+  end
+end
+
+behavior "PoseStamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/PoseStamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.pose.position.x = 1.0
+    and e.pose.position.y = 2.0
+    and e.pose.position.z = 3.0
+    and e.pose.orientation.x = 4.0
+    and e.pose.orientation.y = 5.0
+    and e.pose.orientation.z = 6.0
+    and e.pose.orientation.w = 7.0
+  end
+end
+
+behavior "PoseWithCovariance"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/PoseWithCovariance@_ros2cli_* as e
+    and e.pose.position.x = 1.0
+    and e.pose.position.y = 2.0
+    and e.pose.position.z = 3.0
+    and e.pose.orientation.x = 4.0
+    and e.pose.orientation.y = 5.0
+    and e.pose.orientation.z = 6.0
+    and e.pose.orientation.w = 7.0
+    and not exists(e.pose.covariance.0)
+  end
+end
+
+behavior "PoseWithCovarianceStamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/PoseWithCovarianceStamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.pose.pose.position.x = 1.0
+    and e.pose.pose.position.y = 2.0
+    and e.pose.pose.position.z = 3.0
+    and e.pose.pose.orientation.x = 4.0
+    and e.pose.pose.orientation.y = 5.0
+    and e.pose.pose.orientation.z = 6.0
+    and e.pose.pose.orientation.w = 7.0
+    and not exists(e.pose.covariance.0)
+  end
+end
+
+behavior "Quaternion"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Quaternion@_ros2cli_* as e
+    and e.x = 1.0
+    and e.y = 2.0
+    and e.z = 3.0
+    and e.w = 4.0
+  end
+end
+
+behavior "QuaternionStamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/QuaternionStamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.quaternion.x = 1.0
+    and e.quaternion.y = 2.0
+    and e.quaternion.z = 3.0
+    and e.quaternion.w = 4.0
+  end
+end
+
+behavior "Transform"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Transform@_ros2cli_* as e
+    and e.translation.x = 1.0
+    and e.translation.y = 2.0
+    and e.translation.z = 3.0
+    and e.rotation.x = 4.0
+    and e.rotation.y = 5.0
+    and e.rotation.z = 6.0
+    and e.rotation.w = 7.0
+  end
+end
+
+behavior "TransformStamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/TransformStamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.transform.translation.x = 1.0
+    and e.transform.translation.y = 2.0
+    and e.transform.translation.z = 3.0
+    and e.transform.rotation.x = 4.0
+    and e.transform.rotation.y = 5.0
+    and e.transform.rotation.z = 6.0
+    and e.transform.rotation.w = 7.0
+  end
+end
+
+behavior "Twist"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Twist@_ros2cli_* as e
+    and e.linear.x = 1.0
+    and e.linear.y = 2.0
+    and e.linear.z = 3.0
+    and e.angular.x = 4.0
+    and e.angular.y = 5.0
+    and e.angular.z = 6.0
+  end
+end
+
+behavior "TwistStamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/TwistStamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.twist.linear.x = 1.0
+    and e.twist.linear.y = 2.0
+    and e.twist.linear.z = 3.0
+    and e.twist.angular.x = 4.0
+    and e.twist.angular.y = 5.0
+    and e.twist.angular.z = 6.0
+  end
+end
+
+behavior "TwistWithCovariance"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/TwistWithCovariance@_ros2cli_* as e
+    and e.twist.linear.x = 1.0
+    and e.twist.linear.y = 2.0
+    and e.twist.linear.z = 3.0
+    and e.twist.angular.x = 4.0
+    and e.twist.angular.y = 5.0
+    and e.twist.angular.z = 6.0
+    and not exists(e.covariance.0)
+  end
+end
+
+behavior "TwistWithCovarianceStamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/TwistWithCovarianceStamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.twist.twist.linear.x = 1.0
+    and e.twist.twist.linear.y = 2.0
+    and e.twist.twist.linear.z = 3.0
+    and e.twist.twist.angular.x = 4.0
+    and e.twist.twist.angular.y = 5.0
+    and e.twist.twist.angular.z = 6.0
+    and not exists(e.twist.covariance.0)
+  end
+end
+
+behavior "Vector3"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Vector3@_ros2cli_* as e
+    and e.x = 1.0
+    and e.y = 2.0
+    and e.z = 3.0
+  end
+end
+
+behavior "Vector3Stamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Vector3Stamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.vector.x = 1.0
+    and e.vector.y = 2.0
+    and e.vector.z = 3.0
+  end
+end
+
+behavior "Wrench"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/Wrench@_ros2cli_* as e
+    and e.force.x = 1.0
+    and e.force.y = 2.0
+    and e.force.z = 3.0
+    and e.torque.x = 4.0
+    and e.torque.y = 5.0
+    and e.torque.z = 6.0
+  end
+end
+
+behavior "WrenchStamped"
+  nominal case "Message Occcured"
+    geometry_msgs/msg/WrenchStamped@_ros2cli_* as e
+    and e.header.stamp.sec = 42
+    and e.header.stamp.nanosec = 43
+    and e.header.frame_id = "test"
+    and e.wrench.force.x = 1.0
+    and e.wrench.force.y = 2.0
+    and e.wrench.force.z = 3.0
+    and e.wrench.torque.x = 4.0
+    and e.wrench.torque.y = 5.0
+    and e.wrench.torque.z = 6.0
+  end
+end

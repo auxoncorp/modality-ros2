@@ -1,0 +1,268 @@
+behavior "Bool"
+  nominal case "Message Occcured"
+    std_msgs/msg/Bool@_ros2cli_* as e
+    and e.data = true
+  end
+end
+
+behavior "Char"
+  nominal case "Message Occcured"
+    std_msgs/msg/Char@_ros2cli_* as e
+    and e.data = 63
+  end
+end
+
+behavior "ColorRGBA"
+  nominal case "Message Occcured"
+    std_msgs/msg/ColorRGBA@_ros2cli_* as e
+    and e.r = 1.0
+    and e.g = 2.0
+    and e.b = 3.0
+    and e.a = 4.0
+  end
+end
+
+behavior "Empty"
+  nominal case "Message Occcured"
+    std_msgs/msg/Empty@_ros2cli_* as e
+  end
+end
+
+behavior "Header"
+  nominal case "Message Occcured"
+    std_msgs/msg/Header@_ros2cli_* as e
+    and e.stamp.sec = 42
+    and e.stamp.nanosec = 43
+    and e.frame_id = "test"
+  end
+end
+
+behavior "Float32"
+  nominal case "Message Occcured"
+    std_msgs/msg/Float32@_ros2cli_* as e
+    and e.data = 1.0
+  end
+end
+
+behavior "Float64"
+  nominal case "Message Occcured"
+    std_msgs/msg/Float64@_ros2cli_* as e
+    and e.data = 1.0
+  end
+end
+
+behavior "Byte"
+  nominal case "Message Occcured"
+    std_msgs/msg/Byte@_ros2cli_* as e
+    and e.data = 1
+  end
+end
+
+behavior "Int8"
+  nominal case "Message Occcured"
+    std_msgs/msg/Int8@_ros2cli_* as e
+    and e.data = 1
+  end
+end
+
+behavior "Int16"
+  nominal case "Message Occcured"
+    std_msgs/msg/Int16@_ros2cli_* as e
+    and e.data = 1
+  end
+end
+
+behavior "Int32"
+  nominal case "Message Occcured"
+    std_msgs/msg/Int32@_ros2cli_* as e
+    and e.data = 1
+  end
+end
+
+behavior "Int64"
+  nominal case "Message Occcured"
+    std_msgs/msg/Int64@_ros2cli_* as e
+    and e.data = 1
+  end
+end
+
+behavior "UInt8"
+  nominal case "Message Occcured"
+    std_msgs/msg/UInt8@_ros2cli_* as e
+    and e.data = 1
+  end
+end
+
+behavior "UInt16"
+  nominal case "Message Occcured"
+    std_msgs/msg/UInt16@_ros2cli_* as e
+    and e.data = 1
+  end
+end
+
+behavior "UInt32"
+  nominal case "Message Occcured"
+    std_msgs/msg/UInt32@_ros2cli_* as e
+    and e.data = 1
+  end
+end
+
+behavior "UInt64"
+  nominal case "Message Occcured"
+    std_msgs/msg/UInt64@_ros2cli_* as e
+    and e.data = 1
+  end
+end
+
+# ByteMultiArray: There is currently no way to send byte array data from the ros2 cli
+# https://github.com/ros2/ros2cli/issues/760
+# TODO getting e.dim.0.layout.label etc.
+behavior "ByteMultiArray"
+  nominal case "Message Occcured"
+    std_msgs/msg/ByteMultiArray@_ros2cli_* as e
+    and e.layout.dim.0.label = "Dimension"
+    and e.layout.dim.0.size = 0
+    and e.layout.dim.0.stride = 1
+    and e.layout.data_offset = 0
+  end
+end
+
+behavior "Float32MultiArray"
+  nominal case "Message Occcured"
+    std_msgs/msg/Float32MultiArray@_ros2cli_* as e
+    and e.layout.dim.0.label = "Dimension"
+    and e.layout.dim.0.size = 4
+    and e.layout.dim.0.stride = 1
+    and e.layout.data_offset = 0
+    and e.data.0 = 1.0
+    and e.data.1 = 2.0
+    and e.data.2 = 3.0
+    and e.data.3 = 4.0
+  end
+end
+
+behavior "Float64MultiArray"
+  nominal case "Message Occcured"
+    std_msgs/msg/Float64MultiArray@_ros2cli_* as e
+    and e.layout.dim.0.label = "Dimension"
+    and e.layout.dim.0.size = 4
+    and e.layout.dim.0.stride = 1
+    and e.layout.data_offset = 0
+    and e.data.0 = 1.0
+    and e.data.1 = 2.0
+    and e.data.2 = 3.0
+    and e.data.3 = 4.0
+  end
+end
+
+behavior "Int8MultiArray"
+  nominal case "Message Occcured"
+    std_msgs/msg/Int8MultiArray@_ros2cli_* as e
+    and e.layout.dim.0.label = "Dimension"
+    and e.layout.dim.0.size = 4
+    and e.layout.dim.0.stride = 1
+    and e.layout.data_offset = 0
+    and e.data.0 = 1
+    and e.data.1 = 2
+    and e.data.2 = 3 
+    and e.data.3 = 4
+  end
+end
+
+behavior "Int16MultiArray"
+  nominal case "Message Occcured"
+    std_msgs/msg/Int16MultiArray@_ros2cli_* as e
+    and e.layout.dim.0.label = "Dimension"
+    and e.layout.dim.0.size = 4
+    and e.layout.dim.0.stride = 1
+    and e.layout.data_offset = 0
+    and e.data.0 = 1
+    and e.data.1 = 2
+    and e.data.2 = 3 
+    and e.data.3 = 4
+  end
+end
+
+behavior "Int32MultiArray"
+  nominal case "Message Occcured"
+    std_msgs/msg/Int32MultiArray@_ros2cli_* as e
+    and e.layout.dim.0.label = "Dimension"
+    and e.layout.dim.0.size = 4
+    and e.layout.dim.0.stride = 1
+    and e.layout.data_offset = 0
+    and e.data.0 = 1
+    and e.data.1 = 2
+    and e.data.2 = 3 
+    and e.data.3 = 4
+  end
+end
+
+behavior "Int64MultiArray"
+  nominal case "Message Occcured"
+    std_msgs/msg/Int64MultiArray@_ros2cli_* as e
+    and e.layout.dim.0.label = "Dimension"
+    and e.layout.dim.0.size = 4
+    and e.layout.dim.0.stride = 1
+    and e.layout.data_offset = 0
+    and e.data.0 = 1
+    and e.data.1 = 2
+    and e.data.2 = 3 
+    and e.data.3 = 4
+  end
+end
+
+behavior "UInt8MultiArray"
+  nominal case "Message Occcured"
+    std_msgs/msg/UInt8MultiArray@_ros2cli_* as e
+    and e.layout.dim.0.label = "Dimension"
+    and e.layout.dim.0.size = 4
+    and e.layout.dim.0.stride = 1
+    and e.layout.data_offset = 0
+    and e.data.0 = 1
+    and e.data.1 = 2
+    and e.data.2 = 3 
+    and e.data.3 = 4
+  end
+end
+
+behavior "UInt16MultiArray"
+  nominal case "Message Occcured"
+    std_msgs/msg/UInt16MultiArray@_ros2cli_* as e
+    and e.layout.dim.0.label = "Dimension"
+    and e.layout.dim.0.size = 4
+    and e.layout.dim.0.stride = 1
+    and e.layout.data_offset = 0
+    and e.data.0 = 1
+    and e.data.1 = 2
+    and e.data.2 = 3 
+    and e.data.3 = 4
+  end
+end
+
+behavior "UInt32MultiArray"
+  nominal case "Message Occcured"
+    std_msgs/msg/UInt32MultiArray@_ros2cli_* as e
+    and e.layout.dim.0.label = "Dimension"
+    and e.layout.dim.0.size = 4
+    and e.layout.dim.0.stride = 1
+    and e.layout.data_offset = 0
+    and e.data.0 = 1
+    and e.data.1 = 2
+    and e.data.2 = 3 
+    and e.data.3 = 4
+  end
+end
+
+behavior "UInt64MultiArray"
+  nominal case "Message Occcured"
+    std_msgs/msg/UInt64MultiArray@_ros2cli_* as e
+    and e.layout.dim.0.label = "Dimension"
+    and e.layout.dim.0.size = 4
+    and e.layout.dim.0.stride = 1
+    and e.layout.data_offset = 0
+    and e.data.0 = 1
+    and e.data.1 = 2
+    and e.data.2 = 3 
+    and e.data.3 = 4
+  end
+end

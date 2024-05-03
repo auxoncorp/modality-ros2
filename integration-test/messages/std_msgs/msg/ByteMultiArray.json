@@ -1,0 +1,6 @@
+{
+    layout: {
+        dim: [{label: "Dimension", size: 0, stride: 1}],
+        data_offset: 0,
+    }
+}

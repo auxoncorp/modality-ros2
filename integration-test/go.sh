@@ -45,12 +45,8 @@ docker run -t --rm \
        -v ~/.config/modality_cli:/root/.config/modality_cli \
        modality-ros2-integration-test
 
-
-docker run -t --rm --net=host \
-       -e PATH=/ \
-       -e MODALITY_AUTH_TOKEN=${modality_auth_token} \
-       --entrypoint /bin/bash \
-       -v ./smoke.speqtr:/smoke.speqtr \
-       ${reflector_image} \
-       -c "conform spec eval --file /smoke.speqtr --dry-run"
-
+docker run -t --rm --net=host -e PATH=/ -e MODALITY_AUTH_TOKEN=${modality_auth_token} \
+       -v ./specs:/specs \
+       -v ./inner_verify.sh:/inner_verify.sh \
+       --entrypoint /bin/bash ${reflector_image} \
+       -c "/inner_verify.sh"

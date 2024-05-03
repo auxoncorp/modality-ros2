@@ -1,0 +1,16 @@
+{
+    header: {
+        stamp: { sec: 42, nanosec: 43},
+        frame_id: "test"
+    },
+    inertia: {
+        m: 1.0,
+        com: { x: 2.0, y: 3.0, z: 4.0},
+        ixx: 5.0,
+        ixy: 6.0,
+        ixz: 7.0,
+        iyy: 8.0,
+        iyz: 9.0,
+        izz: 10.0
+    }
+}
