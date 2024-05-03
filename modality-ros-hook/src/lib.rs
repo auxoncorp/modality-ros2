@@ -68,7 +68,7 @@ pub struct ScalarMemberSchema {
 pub struct ScalarArrayMemberSchema {
     pub key: String,
     pub type_id: ros::rosidl::typesupport_introspection::field_type,
-    pub offset: usize,
+    pub offset_in_item_slice: usize,
     pub array_size: usize,
     pub is_upper_bound: bool,
     pub size_function: Option<unsafe extern "C" fn(*const c_void) -> usize>,
@@ -114,7 +114,7 @@ impl RosMessageSchema {
             namespace: String::from_utf8_lossy(
                 CStr::from_ptr((*c_schema).message_namespace_).to_bytes(),
             )
-            .to_string(),
+                .to_string(),
             name: String::from_utf8_lossy(CStr::from_ptr((*c_schema).message_name_).to_bytes())
                 .to_string(),
             size: (*c_schema).size_of_,
@@ -222,12 +222,12 @@ impl RosMessageMemberSchema {
                 is_upper_bound,
                 size_function,
                 get_function,
-                offset,
+                offset: array_offset,
             } => match *item_schema {
                 RosMessageMemberSchema::Scalar {
                     name,
                     type_id,
-                    offset: _,
+                    offset: scalar_offset,
                 } => {
                     let mut name_segs = prefix.clone();
                     name_segs.push(name);
@@ -235,7 +235,7 @@ impl RosMessageMemberSchema {
                         ScalarArrayMemberSchema {
                             key: name_segs.join("."),
                             type_id,
-                            offset,
+                            offset_in_item_slice: scalar_offset,
                             array_size,
                             is_upper_bound,
                             size_function,
@@ -245,18 +245,21 @@ impl RosMessageMemberSchema {
                 }
                 RosMessageMemberSchema::NestedMessage {
                     name,
+                    // This offset duplicates the offset found in the parent array
                     offset: _,
                     schema,
                 } => {
                     let mut name_segs = prefix.clone();
                     name_segs.push(name);
 
-                    let message_schema = schema.flatten(prefix);
+                    // flatten the internal msg with no prefix; it is
+                    // added when emitting the data
+                    let message_schema = schema.flatten(&vec![]);
 
                     target.push(FlatRosMessageMemberSchema::MessageSequence(
                         MessageSequenceMemberSchema {
                             key: name_segs.join("."),
-                            offset,
+                            offset: initial_offset + array_offset,
                             message_schema,
                             array_size,
                             is_upper_bound,
@@ -643,11 +646,11 @@ impl ScalarArrayMemberSchema {
             size_function: _,
             get_function,
             type_id,
-            offset,
+            offset_in_item_slice,
         } = &self;
 
         unsafe {
-            if let Some(slice) = message.get(*offset..) {
+            if let Some(slice) = message.get(*offset_in_item_slice..) {
                 let scalar_array_ptr = (slice).as_ptr() as *const c_void;
 
                 let seq: *const ros::rosidl::runtime::ByteSequence =
