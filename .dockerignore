@@ -1,2 +1,3 @@
 **/target
-ros-deps-for-development
+ros-deps-for-development/
+integration-test/
