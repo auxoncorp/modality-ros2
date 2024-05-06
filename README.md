@@ -21,8 +21,8 @@ An `LD_PRELOAD` integration for the rmw (ROS middleware abstraction) interface l
 
   * Download the latest artifact from github releases
   ```bash
-  wget -O libmodality_ros_hook.so https://github.com/auxoncorp/modality-ros2/releases/latest/download/libmodality_ros_hook_22.04_amd64.so
-  wget -O ros_deps https://github.com/auxoncorp/modality-ros2/releases/latest/download/ros_deps_22.04
+  wget libmodality_ros_hook.so https://github.com/auxoncorp/modality-ros2/releases/latest/download/libmodality_ros_hook_22.04_amd64.so
+  wget ros_deps https://github.com/auxoncorp/modality-ros2/releases/latest/download/ros_deps_22.04_amd64
   ```
 
 3. Set `LD_PRELOAD` environment variable prior to running ROS nodes.
